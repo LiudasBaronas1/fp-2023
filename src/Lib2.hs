@@ -50,7 +50,9 @@ executeStatement (ShowTable tablename) =
 executeStatement (Select columnNames tableName) =
   case lookup (map toLower tableName) database of
     Just df -> do
-      let selectedCols = filter (\col -> columnName col `elem` columnNames) (columns df)
+      let selectedCols = if "*" `elem` columnNames
+                         then columns df
+                         else filter (\col -> columnName col `elem` columnNames) (columns df)
       let selectedIndices = map (columnIndex df) selectedCols
       let selectedRows = map (\row -> map (\i -> row !! i) selectedIndices) (rows df)
       Right $ DataFrame selectedCols selectedRows
