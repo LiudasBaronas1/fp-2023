@@ -22,7 +22,7 @@ data ParsedStatement
   | Select [String] TableName
   | ParsedStatement
   | Max String TableName String
-
+  | Avg String TableName String
 
 -- Parses user input into an entity representing a parsed
 -- statement
@@ -36,8 +36,8 @@ parseStatement statement =
       case reverse columns of
         (tableName : revCols) -> Right (Select (reverse revCols) tableName)
         _ -> Left "Invalid SELECT statement"
+    ["avg", columnName, "from", tableName] -> Right (Avg columnName tableName "Average Value")
     _ -> Left "Not supported statement"
-
 
 -- Executes a parsed statement. Produces a DataFrame. Uses
 -- InMemoryTables.database as a source of data.
@@ -65,6 +65,22 @@ executeStatement (Max columnName tableName resultColumn) =
                      _ -> foldl1 (maxValue colIndex (columnType (columns df !! colIndex))) (map (!! colIndex) nonNullRows)
       Right $ DataFrame [Column resultColumn (columnType (columns df !! colIndex))] [[maxVal]]
     Nothing -> Left "Table not found"
+executeStatement (Avg columnName tableName resultColumn) =
+  case lookup (map toLower tableName) database of
+    Just df -> do
+      let colIndex = columnIndex df (Column columnName StringType)
+      let nonNullRows = filter (\row -> case row !! colIndex of { NullValue -> False; _ -> True }) (rows df)
+      let avgVal = case nonNullRows of
+                     [] -> NullValue
+                     _ -> calculateAverage colIndex nonNullRows
+      Right $ DataFrame [Column resultColumn (columnType (columns df !! colIndex))] [[avgVal]]
+    Nothing -> Left "Table not found"
+
+calculateAverage :: Int -> [Row] -> Value
+calculateAverage colIndex rows =
+  let total = sum [case row !! colIndex of { IntegerValue i -> i; _ -> 0 } | row <- rows]
+      count = toInteger (length rows)
+  in if count > 0 then IntegerValue (total `div` count) else NullValue
 
 maxValue :: Int -> ColumnType -> Value -> Value -> Value
 maxValue _ IntegerType (IntegerValue i1) (IntegerValue i2) = if i1 > i2 then IntegerValue i1 else IntegerValue i2
