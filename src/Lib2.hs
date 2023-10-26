@@ -3,23 +3,30 @@
 module Lib2
   ( parseStatement,
     executeStatement,
-    ParsedStatement (..)
+    ParsedStatement (..),
+    Condition (..)
   )
 where
 
 import DataFrame (Column (..), ColumnType (..), Value (..), DataFrame (..), Row (..))
 import InMemoryTables (TableName, database)
-import Data.List(isPrefixOf, find, elemIndex, maximumBy)
-import Data.Char(toLower)
+import Data.List (isPrefixOf, find, elemIndex)
+import Data.Char (toLower, isSpace)
 import Data.Maybe (fromJust)
 
 type ErrorMessage = String
 type Database = [(TableName, DataFrame)]
 
+data Condition = OrCondition [Condition]
+               | EqualCondition String Value
+               | NotEqualCondition String Value
+               | LessThanOrEqualCondition String Value
+               | GreaterThanOrEqualCondition String Value
+
 data ParsedStatement
   = ShowTables
   | ShowTable TableName
-  | Select [String] TableName
+  | Select [String] TableName (Maybe Condition)  
   | ParsedStatement
   | Max String TableName String
   | Avg String TableName String
@@ -33,12 +40,26 @@ parseStatement statement =
     ["show", "table", tableName] -> Right (ShowTable tableName)
     ["max", columnName, "from", tableName] -> Right (Max columnName tableName "Max Value")
     ("select" : columns) ->
-      case reverse columns of
-        (tableName : revCols) -> Right (Select (reverse revCols) tableName)
+      case break (== "from") columns of
+        (cols, "from" : tableName : "where" : rest) -> do
+          (conditions, _) <- parseWhereConditions rest
+          Right (Select cols tableName (Just conditions))
+        (cols, "from" : tableName : _) -> Right (Select cols tableName Nothing)
         _ -> Left "Invalid SELECT statement"
     ["avg", columnName, "from", tableName] -> Right (Avg columnName tableName "Average Value")
     _ -> Left "Not supported statement"
 
+parseWhereConditions :: [String] -> Either ErrorMessage (Condition, [String])
+parseWhereConditions [] = Right (OrCondition [], [])
+parseWhereConditions (colName : op : value : rest) =
+  case op of
+    "=" -> Right (EqualCondition colName (StringValue value), rest)
+    "<>" -> Right (NotEqualCondition colName (StringValue value), rest)
+    "<=" -> Right (LessThanOrEqualCondition colName (StringValue value), rest)
+    ">=" -> Right (GreaterThanOrEqualCondition colName (StringValue value), rest)
+    _ -> Left "Invalid operator"
+parseWhereConditions (colName : rest) = Right (EqualCondition colName (StringValue (head rest)), tail rest)
+    
 -- Executes a parsed statement. Produces a DataFrame. Uses
 -- InMemoryTables.database as a source of data.
 executeStatement :: ParsedStatement -> Either ErrorMessage DataFrame
@@ -47,16 +68,19 @@ executeStatement (ShowTable tablename) =
   case lookup (map toLower tablename) database of
     Just df -> Right $ DataFrame [Column "Column Name" StringType] (map (\col -> [StringValue (columnName col)]) (columns df))
     Nothing -> Left "Table not found"
-executeStatement (Select columnNames tableName) =
-  case lookup (map toLower tableName) database of
-    Just df -> do
-      let selectedCols = if "*" `elem` columnNames
-                         then columns df
-                         else filter (\col -> columnName col `elem` columnNames) (columns df)
-      let selectedIndices = map (columnIndex df) selectedCols
-      let selectedRows = map (\row -> map (\i -> row !! i) selectedIndices) (rows df)
-      Right $ DataFrame selectedCols selectedRows
-    Nothing -> Left "Table not found"
+executeStatement (Select columnNames tableName maybeCondition) =
+    case lookup (map toLower tableName) database of
+        Just df -> do
+            let filteredRows = case maybeCondition of
+                    Just condition -> filter (\row -> evalCondition condition df row) (rows df)
+                    Nothing -> rows df
+            let selectedCols = if "*" `elem` columnNames
+                               then columns df
+                               else filter (\col -> columnName col `elem` columnNames) (columns df)
+            let selectedIndices = map (columnIndex df) selectedCols
+            let selectedRows = map (\row -> map (\i -> row !! i) selectedIndices) filteredRows
+            Right $ DataFrame selectedCols selectedRows
+        Nothing -> Left "Table not found"
 executeStatement (Max columnName tableName resultColumn) =
   case lookup (map toLower tableName) database of
     Just df -> do
@@ -77,6 +101,36 @@ executeStatement (Avg columnName tableName resultColumn) =
                      _ -> calculateAverage colIndex nonNullRows
       Right $ DataFrame [Column resultColumn (columnType (columns df !! colIndex))] [[avgVal]]
     Nothing -> Left "Table not found"
+
+evalCondition :: Condition -> DataFrame -> Row -> Bool
+evalCondition (OrCondition conditions) df row = any (\cond -> evalCondition cond df row) conditions
+evalCondition (EqualCondition colName val) df row = matchValue (getColumnValue colName df row) val
+evalCondition (NotEqualCondition colName val) df row = not (matchValue (getColumnValue colName df row) val)
+evalCondition (LessThanOrEqualCondition colName val) df row = compareValues (<=) colName val df row
+evalCondition (GreaterThanOrEqualCondition colName val) df row = compareValues (>=) colName val df row
+evalCondition _ _ _ = False
+
+matchValue :: Value -> Value -> Bool
+matchValue (StringValue s1) (StringValue s2) = map toLower s1 == map toLower s2
+matchValue _ _ = False
+
+trimValue :: Value -> Value
+trimValue (StringValue s) = StringValue (trimWhitespace s)
+trimValue v = v
+
+getColumnValue :: String -> DataFrame -> Row -> Value
+getColumnValue colName df row =
+    let colIndex = columnIndex df (Column (trimWhitespace (map toLower colName)) StringType)
+    in row !! colIndex
+
+trimWhitespace :: String -> String
+trimWhitespace = filter (not . isSpace)
+
+compareValues :: (String -> String -> Bool) -> String -> Value -> DataFrame -> Row -> Bool
+compareValues op colName val df row =
+    case (trimValue (getColumnValue colName df row), trimValue val) of
+        (StringValue s1, StringValue s2) -> op (map toLower s1) (map toLower s2)
+        _ -> False
 
 calculateAverage :: Int -> [Row] -> Value
 calculateAverage colIndex rows =
@@ -112,4 +166,3 @@ columns (DataFrame cols _) = cols
 
 columnName :: Column -> String
 columnName (Column name _) = name
-
