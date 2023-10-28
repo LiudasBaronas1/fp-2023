@@ -22,6 +22,7 @@ data Condition = OrCondition [Condition]
                | NotEqualCondition String Value
                | LessThanOrEqualCondition String Value
                | GreaterThanOrEqualCondition String Value
+               deriving (Show, Eq)
 
 data ParsedStatement
   = ShowTables
@@ -30,6 +31,7 @@ data ParsedStatement
   | ParsedStatement
   | Max String TableName String
   | Avg String TableName String
+  deriving (Show, Eq)
 
 -- Parses user input into an entity representing a parsed
 -- statement

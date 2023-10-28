@@ -1,7 +1,9 @@
 import Data.Either
 import Data.Maybe ()
+import DataFrame (Value(..), DataFrame(..), Column(..), ColumnType(StringType))
 import InMemoryTables qualified as D
 import Lib1
+import Lib2
 import Test.Hspec
 
 main :: IO ()
@@ -34,3 +36,25 @@ main = hspec $ do
   describe "Lib1.renderDataFrameAsTable" $ do
     it "renders a table" $ do
       Lib1.renderDataFrameAsTable 100 (snd D.tableEmployees) `shouldSatisfy` not . null
+  describe "Lib2.parseStatement" $ do
+    it "parses SHOW TABLES statement" $ do
+      Lib2.parseStatement "SHOW TABLES" `shouldBe` Right ShowTables
+    it "parses SHOW TABLE statement" $ do
+      Lib2.parseStatement "SHOW TABLE employees" `shouldBe` Right (ShowTable "employees")
+    it "parses SELECT statement without WHERE clause" $ do
+      Lib2.parseStatement "SELECT * FROM employees" `shouldBe` Right (Select ["*"] "employees" Nothing)
+    it "parses SELECT statement with WHERE clause (string comparison)" $ do
+      let statement = "SELECT name FROM employees WHERE name = Vi"
+      Lib2.parseStatement statement `shouldBe`
+        Right (Select ["name"] "employees" (Just (EqualCondition "name" (StringValue "vi"))))
+    it "parses MAX statement" $ do
+      Lib2.parseStatement "MAX salary FROM employees" `shouldBe` Right (Max "salary" "employees" "Max Value")
+    it "parses AVG statement" $ do
+      Lib2.parseStatement "AVG age FROM employees" `shouldBe` Right (Avg "age" "employees" "Average Value")
+    it "handles invalid statements" $ do
+      Lib2.parseStatement "INVALID STATEMENT" `shouldSatisfy` isLeft
+  describe "Lib2.executeStatement" $ do
+    it "executes SELECT statement with WHERE clause (string comparison)" $ do
+      let statement = Select ["name"] "employees" (Just (EqualCondition "name" (StringValue "Vi")))
+      Lib2.executeStatement statement `shouldBe`
+        Right (DataFrame [Column "name" StringType] [[StringValue "Vi"]])
