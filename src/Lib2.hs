@@ -22,6 +22,8 @@ data Condition = OrCondition [Condition]
                | NotEqualCondition String Value
                | LessThanOrEqualCondition String Value
                | GreaterThanOrEqualCondition String Value
+               | LessThanCondition String Value
+               | GreaterThanCondition String Value
                deriving (Show, Eq)
 
 data ParsedStatement
@@ -59,8 +61,11 @@ parseWhereConditions (colName : op : value : rest) =
     "<>" -> Right (NotEqualCondition colName (StringValue value), rest)
     "<=" -> Right (LessThanOrEqualCondition colName (StringValue value), rest)
     ">=" -> Right (GreaterThanOrEqualCondition colName (StringValue value), rest)
+    "<" -> Right (LessThanCondition colName (StringValue value), rest)
+    ">" -> Right (GreaterThanCondition colName (StringValue value), rest)
     _ -> Left "Invalid operator"
 parseWhereConditions (colName : rest) = Right (EqualCondition colName (StringValue (head rest)), tail rest)
+
     
 -- Executes a parsed statement. Produces a DataFrame. Uses
 -- InMemoryTables.database as a source of data.
@@ -110,6 +115,8 @@ evalCondition (EqualCondition colName val) df row = matchValue (getColumnValue c
 evalCondition (NotEqualCondition colName val) df row = not (matchValue (getColumnValue colName df row) val)
 evalCondition (LessThanOrEqualCondition colName val) df row = compareValues (<=) colName val df row
 evalCondition (GreaterThanOrEqualCondition colName val) df row = compareValues (>=) colName val df row
+evalCondition (LessThanCondition colName val) df row = compareValues (<) colName val df row
+evalCondition (GreaterThanCondition colName val) df row = compareValues (>) colName val df row
 evalCondition _ _ _ = False
 
 matchValue :: Value -> Value -> Bool
