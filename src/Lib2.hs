@@ -34,23 +34,28 @@ data ParsedStatement
   | Max String TableName String
   | Avg String TableName String
   deriving (Show, Eq)
-
--- Parses user input into an entity representing a parsed
--- statement
+  
 parseStatement :: String -> Either ErrorMessage ParsedStatement
 parseStatement statement =
   case words (map toLower statement) of
     ["show", "tables"] -> Right ShowTables
     ["show", "table", tableName] -> Right (ShowTable tableName)
-    ["max", columnName, "from", tableName] -> Right (Max columnName tableName "Max Value")
+    ["select", "max(", columnName, ")", "from", tableName] -> Right (Max columnName tableName "Max Value")
+    ["select", "avg(", columnName, ")", "from", tableName] -> Right (Avg columnName tableName "Average Value")
     ("select" : columns) ->
       case break (== "from") columns of
         (cols, "from" : tableName : rest) ->
-          let (conditions, _) = parseConditions rest
-          in Right (Select cols tableName conditions)
+          if ',' `elem` unwords cols
+          then
+            let (conditions, _) = parseConditions rest
+            in Right (Select (splitColumns (unwords cols)) tableName conditions)
+          else
+            Left "Columns should be separated by commas"
         _ -> Left "Invalid SELECT statement"
-    ["avg", columnName, "from", tableName] -> Right (Avg columnName tableName "Average Value")
     _ -> Left "Not supported statement"
+
+splitColumns :: String -> [String]
+splitColumns = words . map (\c -> if c == ',' then ' ' else c)
 
 parseConditions :: [String] -> (Maybe Condition, [String])
 parseConditions [] = (Nothing, [])
@@ -77,8 +82,6 @@ parseConditions (colName : op : value : rest) =
     combineCondition c (Just (OrCondition cs)) = OrCondition (c : cs)
     combineCondition c Nothing = c
 
--- Executes a parsed statement. Produces a DataFrame. Uses
--- InMemoryTables.database as a source of data.
 executeStatement :: ParsedStatement -> Either ErrorMessage DataFrame
 executeStatement ShowTables = Right $ DataFrame [Column "Table Name" StringType] (map (\(name, _) -> [StringValue name]) database)
 executeStatement (ShowTable tablename) =
