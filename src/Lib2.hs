@@ -45,28 +45,38 @@ parseStatement statement =
     ["max", columnName, "from", tableName] -> Right (Max columnName tableName "Max Value")
     ("select" : columns) ->
       case break (== "from") columns of
-        (cols, "from" : tableName : "where" : rest) -> do
-          (conditions, _) <- parseWhereConditions rest
-          Right (Select cols tableName (Just conditions))
-        (cols, "from" : tableName : _) -> Right (Select cols tableName Nothing)
+        (cols, "from" : tableName : rest) ->
+          let (conditions, _) = parseConditions rest
+          in Right (Select cols tableName conditions)
         _ -> Left "Invalid SELECT statement"
     ["avg", columnName, "from", tableName] -> Right (Avg columnName tableName "Average Value")
     _ -> Left "Not supported statement"
 
-parseWhereConditions :: [String] -> Either ErrorMessage (Condition, [String])
-parseWhereConditions [] = Right (OrCondition [], [])
-parseWhereConditions (colName : op : value : rest) =
-  case op of
-    "=" -> Right (EqualCondition colName (StringValue value), rest)
-    "<>" -> Right (NotEqualCondition colName (StringValue value), rest)
-    "<=" -> Right (LessThanOrEqualCondition colName (StringValue value), rest)
-    ">=" -> Right (GreaterThanOrEqualCondition colName (StringValue value), rest)
-    "<" -> Right (LessThanCondition colName (StringValue value), rest)
-    ">" -> Right (GreaterThanCondition colName (StringValue value), rest)
-    _ -> Left "Invalid operator"
-parseWhereConditions (colName : rest) = Right (EqualCondition colName (StringValue (head rest)), tail rest)
+parseConditions :: [String] -> (Maybe Condition, [String])
+parseConditions [] = (Nothing, [])
+parseConditions ("where" : rest) =
+  let (conditions, remaining) = parseConditions rest
+  in (conditions, remaining)
+parseConditions ("or" : rest) =
+  let (nextCondition, remaining) = parseConditions rest
+  in case nextCondition of
+       Just c -> (Just (OrCondition [c]), remaining)
+       Nothing -> (Just (OrCondition []), remaining)
+parseConditions (colName : op : value : rest) =
+  let (nextCondition, remaining) = parseConditions rest
+  in case op of
+    "=" -> (Just $ combineCondition (EqualCondition colName (StringValue value)) nextCondition, remaining)
+    "<>" -> (Just $ combineCondition (NotEqualCondition colName (StringValue value)) nextCondition, remaining)
+    "<=" -> (Just $ combineCondition (LessThanOrEqualCondition colName (StringValue value)) nextCondition, remaining)
+    ">=" -> (Just $ combineCondition (GreaterThanOrEqualCondition colName (StringValue value)) nextCondition, remaining)
+    "<" -> (Just $ combineCondition (LessThanCondition colName (StringValue value)) nextCondition, remaining)
+    ">" -> (Just $ combineCondition (GreaterThanCondition colName (StringValue value)) nextCondition, remaining)
+    _ -> (Nothing, [])
+  where
+    combineCondition :: Condition -> Maybe Condition -> Condition
+    combineCondition c (Just (OrCondition cs)) = OrCondition (c : cs)
+    combineCondition c Nothing = c
 
-    
 -- Executes a parsed statement. Produces a DataFrame. Uses
 -- InMemoryTables.database as a source of data.
 executeStatement :: ParsedStatement -> Either ErrorMessage DataFrame
