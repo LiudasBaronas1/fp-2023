@@ -36,7 +36,7 @@ main = hspec $ do
   describe "Lib1.renderDataFrameAsTable" $ do
     it "renders a table" $ do
       Lib1.renderDataFrameAsTable 100 (snd D.tableEmployees) `shouldSatisfy` not . null
-  describe "Lib2.parseStatement" $ do
+ describe "Lib2.parseStatement" $ do
     it "parses SHOW TABLES statement" $ do
       Lib2.parseStatement "SHOW TABLES" `shouldBe` Right ShowTables
     it "parses SHOW TABLE statement" $ do
@@ -48,11 +48,15 @@ main = hspec $ do
       Lib2.parseStatement statement `shouldBe`
         Right (Select ["name"] "employees" (Just (EqualCondition "name" (StringValue "vi"))))
     it "parses MAX statement" $ do
-      Lib2.parseStatement "MAX salary FROM employees" `shouldBe` Right (Max "salary" "employees" "Max Value")
+      Lib2.parseStatement "select MAX( salary ) FROM employees" `shouldBe` Right (Max "salary" "employees" "Max Value")
     it "parses AVG statement" $ do
-      Lib2.parseStatement "AVG age FROM employees" `shouldBe` Right (Avg "age" "employees" "Average Value")
+      Lib2.parseStatement "select AVG( age ) FROM employees" `shouldBe` Right (Avg "age" "employees" "Average Value")
     it "handles invalid statements" $ do
       Lib2.parseStatement "INVALID STATEMENT" `shouldSatisfy` isLeft
+    it "parses SELECT statement with WHERE OR clause (string comparison)" $ do
+      let statement = "SELECT name FROM employees WHERE name = Vi or name = Ed"
+      Lib2.parseStatement statement `shouldBe`
+        Right (Select ["name"] "employees" (Just (OrCondition [EqualCondition "name" (StringValue "vi"), EqualCondition "name" (StringValue "ed")])))
   describe "Lib2.executeStatement" $ do
     it "executes SELECT statement with WHERE clause (string comparison)" $ do
       let statement = Select ["name"] "employees" (Just (EqualCondition "name" (StringValue "Vi")))
