@@ -45,12 +45,8 @@ parseStatement statement =
     ("select" : columns) ->
       case break (== "from") columns of
         (cols, "from" : tableName : rest) ->
-          if ',' `elem` unwords cols
-          then
-            let (conditions, _) = parseConditions rest
-            in Right (Select (splitColumns (unwords cols)) tableName conditions)
-          else
-            Left "Columns should be separated by commas"
+          let (conditions, _) = parseConditions rest
+          in Right (Select (splitColumns (unwords cols)) tableName conditions)
         _ -> Left "Invalid SELECT statement"
     _ -> Left "Not supported statement"
 
