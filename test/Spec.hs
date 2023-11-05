@@ -92,3 +92,30 @@ main = hspec $ do
     it "executes AVG statement" $ do
       let statement = Avg "id" "employees" "Average Value"
       Lib2.executeStatement statement `shouldBe` Right (DataFrame [Column "Average Value" IntegerType] [[IntegerValue 1]])
+
+    it "executes SELECT statement with string NOT EQUAL condition" $ do
+      let statement = Select ["name"] "employees" (Just (NotEqualCondition "name" (StringValue "Ed")))
+      Lib2.executeStatement statement `shouldBe` Right (DataFrame [Column "name" StringType] [[StringValue "Vi"]])
+
+    it "executes SELECT statement with string EQUAL condition" $ do
+      let statement = Select ["name"] "employees" (Just (EqualCondition "name" (StringValue "vi")))
+      Lib2.executeStatement statement `shouldBe` Right (DataFrame [Column "name" StringType] [[StringValue "Vi"]])
+    it "executes SELECT statement with string GREATER THAN condition" $ do
+      let statement = Select ["name"] "employees" (Just (GreaterThanCondition "name" (StringValue "Ed")))
+      Lib2.executeStatement statement `shouldBe` Right (DataFrame [Column "name" StringType] [[StringValue "Vi"]])
+
+    it "executes SELECT statement with string LESS THAN condition" $ do
+      let statement = Select ["name"] "employees" (Just (LessThanCondition "name" (StringValue "Vi")))
+      Lib2.executeStatement statement `shouldBe` Right (DataFrame [Column "name" StringType] [[StringValue "Ed"]])
+
+    it "executes SELECT statement with string GREATER THAN OR EQUAL condition" $ do
+      let statement = Select ["name"] "employees" (Just (GreaterThanOrEqualCondition "name" (StringValue "Vi")))
+      Lib2.executeStatement statement `shouldBe` Right (DataFrame [Column "name" StringType] [[StringValue "Vi"]])
+
+    it "executes SELECT statement with string LESS THAN OR EQUAL condition" $ do
+      let statement = Select ["name"] "employees" (Just (LessThanOrEqualCondition "name" (StringValue "Vi")))
+      Lib2.executeStatement statement `shouldBe` Right (DataFrame [Column "name" StringType] [[StringValue "Vi"], [StringValue "Ed"]])
+      
+    it "executes SELECT statement with OR condition" $ do
+      let statement = Select ["name"] "employees" (Just (OrCondition [EqualCondition "name" (StringValue "Vi"), EqualCondition "name" (StringValue "Ed")]))
+      Lib2.executeStatement statement `shouldBe` Right (DataFrame [Column "name" StringType] [[StringValue "Vi"], [StringValue "Ed"]])
