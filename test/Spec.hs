@@ -1,6 +1,6 @@
 import Data.Either
 import Data.Maybe ()
-import DataFrame (Value(..), DataFrame(..), Column(..), ColumnType(StringType))
+import DataFrame (Value(..), DataFrame(..), Column(..), ColumnType(StringType), ColumnType(IntegerType))
 import InMemoryTables qualified as D
 import Lib1
 import Lib2
@@ -79,5 +79,16 @@ main = hspec $ do
   describe "Lib2.executeStatement" $ do
     it "executes SELECT statement with WHERE clause (string comparison)" $ do
       let statement = Select ["name"] "employees" (Just (EqualCondition "name" (StringValue "Vi")))
-      Lib2.executeStatement statement `shouldBe`
-        Right (DataFrame [Column "name" StringType] [[StringValue "Vi"]])
+      Lib2.executeStatement statement `shouldBe` Right (DataFrame [Column "name" StringType] [[StringValue "Vi"]])
+      
+    it "executes SELECT statement without WHERE clause" $ do
+      let statement = Select ["*"] "employees" Nothing
+      Lib2.executeStatement statement `shouldBe` Right (DataFrame [Column "id" IntegerType, Column "name" StringType, Column "surname" StringType] [[IntegerValue 1, StringValue "Vi", StringValue "Po"], [IntegerValue 2, StringValue "Ed", StringValue "Dl"]])
+      
+    it "executes MAX statement" $ do
+      let statement = Max "id" "employees" "Max Value"
+      Lib2.executeStatement statement `shouldBe` Right (DataFrame [Column "Max Value" IntegerType] [[IntegerValue 2]])
+    
+    it "executes AVG statement" $ do
+      let statement = Avg "id" "employees" "Average Value"
+      Lib2.executeStatement statement `shouldBe` Right (DataFrame [Column "Average Value" IntegerType] [[IntegerValue 1]])
