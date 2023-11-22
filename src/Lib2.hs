@@ -33,6 +33,7 @@ data ParsedStatement
   | ParsedStatement
   | Max String TableName String
   | Avg String TableName String
+  | Now
   deriving (Show, Eq)
   
 parseStatement :: String -> Either ErrorMessage ParsedStatement
@@ -48,6 +49,7 @@ parseStatement statement =
           let (conditions, _) = parseConditions rest
           in Right (Select (splitColumns (unwords cols)) tableName conditions)
         _ -> Left "Invalid SELECT statement"
+    ["now()"] -> Right Now
     _ -> Left "Not supported statement"
 
 splitColumns :: String -> [String]
