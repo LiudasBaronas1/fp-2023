@@ -11,6 +11,8 @@ import Control.Monad.Free (Free (..), liftF)
 import DataFrame (DataFrame)
 import Data.Time ( UTCTime )
 
+import Lib2 (parseStatement, executeStatement, ParsedStatement)
+
 type TableName = String
 type FileContent = String
 type ErrorMessage = String
@@ -30,5 +32,10 @@ getTime :: Execution UTCTime
 getTime = liftF $ GetTime id
 
 executeSql :: String -> Execution (Either ErrorMessage DataFrame)
-executeSql sql = do
-    return $ Left "implement me"
+executeSql sql = case parseStatement sql of
+  Left err -> return $ Left err
+  Right statement -> do
+    let result = executeStatement statement
+    return $ case result of
+      Left err -> Left err
+      Right df -> Right df
