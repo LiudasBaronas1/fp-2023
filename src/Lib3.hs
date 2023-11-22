@@ -31,6 +31,15 @@ loadFile name = liftF $ LoadFile name id
 getTime :: Execution UTCTime
 getTime = liftF $ GetTime id
 
+updateTable :: TableName -> DataFrame -> Execution DataFrame
+updateTable name df = liftF $ UpdateTable name df id
+
+insertIntoTable :: TableName -> DataFrame -> Execution DataFrame
+insertIntoTable name df = liftF $ InsertIntoTable name df id
+
+deleteFromTable :: TableName -> Execution DataFrame
+deleteFromTable name = liftF $ DeleteFromTable name id
+
 executeSql :: String -> Execution (Either ErrorMessage DataFrame)
 executeSql sql = case parseStatement sql of
   Left err -> return $ Left err
