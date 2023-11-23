@@ -29,7 +29,7 @@ data Condition = OrCondition [Condition]
 data ParsedStatement
   = ShowTables
   | ShowTable TableName
-  | Select [String] TableName (Maybe Condition)  
+  | Select [String] [TableName] (Maybe Condition) 
   | ParsedStatement
   | Max String TableName String
   | Avg String TableName String
@@ -45,15 +45,32 @@ parseStatement statement =
     ["select", "avg(", columnName, ")", "from", tableName] -> Right (Avg columnName tableName "Average Value")
     ("select" : columns) ->
       case break (== "from") columns of
-        (cols, "from" : tableName : rest) ->
-          let (conditions, _) = parseConditions rest
-          in Right (Select (splitColumns (unwords cols)) tableName conditions)
+        (cols, "from" : rest) ->
+          let (tableNames, conditions) = parseTableNamesAndConditions rest
+          in Right (Select (splitColumns (unwords cols)) tableNames conditions)
         _ -> Left "Invalid SELECT statement"
     ["now()"] -> Right Now
     _ -> Left "Not supported statement"
 
+parseTableNamesAndConditions :: [String] -> ([TableName], Maybe Condition)
+parseTableNamesAndConditions [] = ([], Nothing)
+parseTableNamesAndConditions ("where" : rest) =
+  let (conditions, remaining) = parseConditions rest
+  in ([], conditions)
+parseTableNamesAndConditions ("or" : rest) =
+  let (nextCondition, remaining) = parseConditions rest
+  in case nextCondition of
+       Just c -> ([], Just (OrCondition [c]))
+       Nothing -> ([], Just (OrCondition []))
+parseTableNamesAndConditions (tableName : rest) =
+  let (tableNames, conditions) = parseTableNamesAndConditions rest
+  in (splitTableNames tableName ++ tableNames, conditions)
+
 splitColumns :: String -> [String]
 splitColumns = words . map (\c -> if c == ',' then ' ' else c)
+
+splitTableNames :: String -> [TableName]
+splitTableNames = words . map (\c -> if c == ',' then ' ' else c)
 
 parseConditions :: [String] -> (Maybe Condition, [String])
 parseConditions [] = (Nothing, [])
@@ -86,19 +103,20 @@ executeStatement (ShowTable tablename) =
   case lookup (map toLower tablename) database of
     Just df -> Right $ DataFrame [Column "Column Name" StringType] (map (\col -> [StringValue (columnName col)]) (columns df))
     Nothing -> Left "Table not found"
-executeStatement (Select columnNames tableName maybeCondition) =
-    case lookup (map toLower tableName) database of
-        Just df -> do
-            let filteredRows = case maybeCondition of
-                    Just condition -> filter (\row -> evalCondition condition df row) (rows df)
-                    Nothing -> rows df
-            let selectedCols = if "*" `elem` columnNames
-                               then columns df
-                               else filter (\col -> columnName col `elem` columnNames) (columns df)
-            let selectedIndices = map (columnIndex df) selectedCols
-            let selectedRows = map (\row -> map (\i -> row !! i) selectedIndices) filteredRows
-            Right $ DataFrame selectedCols selectedRows
-        Nothing -> Left "Table not found"
+executeStatement (Select columnNames tableNames maybeCondition) =
+  case mapM (\tableName -> lookup (map toLower tableName) database) tableNames of
+    Just dfs -> do
+      let mergedDF = foldr mergeDataFrames (head dfs) (tail dfs)
+      let filteredRows = case maybeCondition of
+              Just condition -> filter (\row -> evalCondition condition mergedDF row) (rows mergedDF)
+              Nothing -> rows mergedDF
+      let selectedCols = if "*" `elem` columnNames
+                         then columns mergedDF
+                         else filter (\col -> columnName col `elem` columnNames) (columns mergedDF)
+      let selectedIndices = map (columnIndex mergedDF) selectedCols
+      let selectedRows = map (\row -> map (\i -> row !! i) selectedIndices) filteredRows
+      Right $ DataFrame selectedCols selectedRows
+    Nothing -> Left "Table not found"
 executeStatement (Max columnName tableName resultColumn) =
   case lookup (map toLower tableName) database of
     Just df -> do
@@ -119,6 +137,10 @@ executeStatement (Avg columnName tableName resultColumn) =
                      _ -> calculateAverage colIndex nonNullRows
       Right $ DataFrame [Column resultColumn (columnType (columns df !! colIndex))] [[avgVal]]
     Nothing -> Left "Table not found"
+
+mergeDataFrames :: DataFrame -> DataFrame -> DataFrame
+mergeDataFrames (DataFrame cols1 rows1) (DataFrame cols2 rows2) =
+  DataFrame (cols1 ++ cols2) (zipWith (++) rows1 rows2)
 
 evalCondition :: Condition -> DataFrame -> Row -> Bool
 evalCondition (OrCondition conditions) df row = any (\cond -> evalCondition cond df row) conditions
