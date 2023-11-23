@@ -10,7 +10,7 @@ where
 
 import DataFrame (Column (..), ColumnType (..), Value (..), DataFrame (..), Row (..))
 import InMemoryTables (TableName, database)
-import Data.List (isPrefixOf, find, elemIndex)
+import Data.List (isPrefixOf, find, elemIndex, foldl')
 import Data.Char (toLower, isSpace)
 import Data.Maybe (fromJust)
 
@@ -105,17 +105,21 @@ executeStatement (ShowTable tablename) =
     Nothing -> Left "Table not found"
 executeStatement (Select columnNames tableNames maybeCondition) =
   case mapM (\tableName -> lookup (map toLower tableName) database) tableNames of
-    Just dfs -> do
-      let mergedDF = foldr mergeDataFrames (head dfs) (tail dfs)
-      let filteredRows = case maybeCondition of
-              Just condition -> filter (\row -> evalCondition condition mergedDF row) (rows mergedDF)
-              Nothing -> rows mergedDF
-      let selectedCols = if "*" `elem` columnNames
-                         then columns mergedDF
-                         else filter (\col -> columnName col `elem` columnNames) (columns mergedDF)
-      let selectedIndices = map (columnIndex mergedDF) selectedCols
-      let selectedRows = map (\row -> map (\i -> row !! i) selectedIndices) filteredRows
-      Right $ DataFrame selectedCols selectedRows
+    Just dfs ->
+      case dfs of
+        [] -> Left "No tables provided"
+        (firstDF:restDFs) -> do
+          let mergedDF = foldl' mergeDataFrames firstDF restDFs
+          let filteredRows = case maybeCondition of
+                  Just condition -> filter (\row -> evalCondition condition mergedDF row) (rows mergedDF)
+                  Nothing -> rows mergedDF
+          let selectedCols = if "*" `elem` columnNames
+                             then columns mergedDF
+                             else filter (\col -> columnName col `elem` columnNames) (columns mergedDF)
+          let selectedIndices = map (columnIndex mergedDF) selectedCols
+          let selectedRows = map (\row -> map (\i -> row !! i) selectedIndices) filteredRows
+          Right $ DataFrame selectedCols selectedRows
+        _ -> Left "No tables provided"
     Nothing -> Left "Table not found"
 executeStatement (Max columnName tableName resultColumn) =
   case lookup (map toLower tableName) database of
@@ -139,8 +143,9 @@ executeStatement (Avg columnName tableName resultColumn) =
     Nothing -> Left "Table not found"
 
 mergeDataFrames :: DataFrame -> DataFrame -> DataFrame
-mergeDataFrames (DataFrame cols1 rows1) (DataFrame cols2 rows2) =
-  DataFrame (cols1 ++ cols2) (zipWith (++) rows1 rows2)
+mergeDataFrames df1 df2 =
+  let mergedRows = [row1 ++ row2 | row1 <- rows df1, row2 <- rows df2]
+  in DataFrame (columns df1 ++ columns df2) mergedRows
 
 evalCondition :: Condition -> DataFrame -> Row -> Bool
 evalCondition (OrCondition conditions) df row = any (\cond -> evalCondition cond df row) conditions
