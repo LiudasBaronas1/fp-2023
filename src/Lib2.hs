@@ -108,8 +108,18 @@ executeStatement (Select columnNames tableNames maybeCondition) =
     Just dfs ->
       case dfs of
         [] -> Left "No tables provided"
-        (firstDF:restDFs) -> do
-          let mergedDF = foldl' mergeDataFrames firstDF restDFs
+        [singleDF] -> do
+          let filteredRows = case maybeCondition of
+                Just condition -> filter (\row -> evalCondition condition singleDF row) (rows singleDF)
+                Nothing -> rows singleDF
+          let selectedCols = if "*" `elem` columnNames
+                             then columns singleDF
+                             else filter (\col -> columnName col `elem` columnNames) (columns singleDF)
+          let selectedIndices = map (columnIndex singleDF) selectedCols
+          let selectedRows = map (\row -> map (\i -> row !! i) selectedIndices) filteredRows
+          Right $ DataFrame selectedCols selectedRows
+        multipleDFs -> do
+          let mergedDF = mergeDataFrames (zip tableNames dfs)
           let filteredRows = case maybeCondition of
                   Just condition -> filter (\row -> evalCondition condition mergedDF row) (rows mergedDF)
                   Nothing -> rows mergedDF
@@ -119,7 +129,6 @@ executeStatement (Select columnNames tableNames maybeCondition) =
           let selectedIndices = map (columnIndex mergedDF) selectedCols
           let selectedRows = map (\row -> map (\i -> row !! i) selectedIndices) filteredRows
           Right $ DataFrame selectedCols selectedRows
-        _ -> Left "No tables provided"
     Nothing -> Left "Table not found"
 executeStatement (Max columnName tableName resultColumn) =
   case lookup (map toLower tableName) database of
@@ -142,10 +151,23 @@ executeStatement (Avg columnName tableName resultColumn) =
       Right $ DataFrame [Column resultColumn (columnType (columns df !! colIndex))] [[avgVal]]
     Nothing -> Left "Table not found"
 
-mergeDataFrames :: DataFrame -> DataFrame -> DataFrame
-mergeDataFrames df1 df2 =
-  let mergedRows = [row1 ++ row2 | row1 <- rows df1, row2 <- rows df2]
-  in DataFrame (columns df1 ++ columns df2) mergedRows
+mergeDataFrames :: [(TableName, DataFrame)] -> DataFrame
+mergeDataFrames [] = error "No data frames to merge"
+mergeDataFrames ((firstTableName, firstDF) : rest) =
+  let mergeTwoDF :: TableName -> DataFrame -> DataFrame -> DataFrame
+      mergeTwoDF currentTable nextDF mergedDF =
+        let prefixedNextDF = addTablePrefix currentTable nextDF
+            mergedRows = [row1 ++ row2 | row1 <- rows mergedDF, row2 <- rows prefixedNextDF]
+        in DataFrame (columns mergedDF ++ columns prefixedNextDF) mergedRows
+
+      addTablePrefix :: TableName -> DataFrame -> DataFrame
+      addTablePrefix tableName' df' =
+        let prefixColumns (Column name colType) = Column (tableName' ++ "." ++ name) colType
+            prefixedCols = map prefixColumns (columns df')
+        in DataFrame prefixedCols (rows df')
+        
+      prefixedFirstDF = addTablePrefix firstTableName firstDF
+  in foldl' (\acc (t, d) -> mergeTwoDF t d acc) prefixedFirstDF rest
 
 evalCondition :: Condition -> DataFrame -> Row -> Bool
 evalCondition (OrCondition conditions) df row = any (\cond -> evalCondition cond df row) conditions
