@@ -99,7 +99,35 @@ main = hspec $ do
     it "parses SELECT statement with WHERE OR clause when value is lesser (string comparison)" $ do
       let statement = "SELECT name FROM employees WHERE id < 0"
       Lib2.parseStatement statement `shouldBe` Right (Select ["name"] ["employees"] (Just (LessThanCondition "id" (StringValue "0"))))
-  
+
+    it "parses SELECT statement with multiple tables and EQUAL condition" $ do
+      let statement = "SELECT employees.name, flags.flag FROM employees, flags WHERE employees.name = flags.flag"
+      Lib2.parseStatement statement `shouldBe` Right (Select ["employees.name", "flags.flag"] ["employees", "flags"] (Just (EqualCondition "employees.name" (StringValue "flags.flag"))))
+
+    it "parses SELECT statement with multiple tables and NOT EQUAL condition" $ do
+      let statement = "SELECT employees.name, flags.flag FROM employees, flags WHERE employees.name <> flags.flag"
+      Lib2.parseStatement statement `shouldBe` Right (Select ["employees.name", "flags.flag"] ["employees", "flags"] (Just (NotEqualCondition "employees.name" (StringValue "flags.flag"))))
+
+    it "parses SELECT statement with multiple tables and LESS THAN condition" $ do
+      let statement = "SELECT employees.name, flags.flag FROM employees, flags WHERE employees.name < flags.flag"
+      Lib2.parseStatement statement `shouldBe` Right (Select ["employees.name", "flags.flag"] ["employees", "flags"] (Just (LessThanCondition "employees.name" (StringValue "flags.flag"))))
+
+    it "parses SELECT statement with multiple tables and GREATER THAN condition" $ do
+      let statement = "SELECT employees.name, flags.flag FROM employees, flags WHERE employees.name > flags.flag"
+      Lib2.parseStatement statement `shouldBe` Right (Select ["employees.name", "flags.flag"] ["employees", "flags"] (Just (GreaterThanCondition "employees.name" (StringValue "flags.flag"))))
+
+    it "parses SELECT statement with multiple tables and GREATER THAN OR EQAUL condition" $ do
+      let statement = "SELECT employees.name, flags.flag FROM employees, flags WHERE employees.name >= flags.flag"
+      Lib2.parseStatement statement `shouldBe` Right (Select ["employees.name", "flags.flag"] ["employees", "flags"] (Just (GreaterThanOrEqualCondition "employees.name" (StringValue "flags.flag"))))
+
+    it "parses SELECT statement with multiple tables and LESS THAN OR EQAUL condition" $ do
+      let statement = "SELECT employees.name, flags.flag FROM employees, flags WHERE employees.name <= flags.flag"
+      Lib2.parseStatement statement `shouldBe` Right (Select ["employees.name", "flags.flag"] ["employees", "flags"] (Just (LessThanOrEqualCondition "employees.name" (StringValue "flags.flag"))))
+
+    it "parses SELECT statement with multiple tables and no WHERE condition" $ do
+      let statement =  "SELECT employees.name, flags.flag FROM employees, flags"
+      Lib2.parseStatement statement `shouldBe` Right (Select ["employees.name", "flags.flag"] ["employees", "flags"] Nothing)
+      
   describe "Lib2.executeStatement" $ do
     it "executes SELECT statement with WHERE clause (string comparison)" $ do
       let statement = Select ["name"] ["employees"] (Just (EqualCondition "name" (StringValue "Vi")))
@@ -143,3 +171,63 @@ main = hspec $ do
     it "executes SELECT statement with OR condition" $ do
       let statement = Select ["name"] ["employees"] (Just (OrCondition [EqualCondition "name" (StringValue "Vi"), EqualCondition "name" (StringValue "Ed")]))
       Lib2.executeStatement statement `shouldBe` Right (DataFrame [Column "name" StringType] [[StringValue "Vi"], [StringValue "Ed"]])
+
+    it "executes SELECT statement with multiple tables and EQUAL condition" $ do
+      let statement = Select ["employees.name", "flags.flag"] ["employees", "flags"] (Just (EqualCondition "employees.name" (StringValue "flags.flag")))
+      Lib2.executeStatement statement `shouldBe` Right (DataFrame [Column "employees.name" StringType, Column "flags.flag" StringType] [])
+
+    it "executes SELECT statement with multiple tables and NOT EQUAL condition" $ do
+      let statement = Select ["employees.name", "flags.flag"] ["employees", "flags"] (Just (NotEqualCondition "employees.name" (StringValue "flags.flag")))
+      Lib2.executeStatement statement `shouldBe` Right (DataFrame [Column "employees.name" StringType, Column "flags.flag" StringType] 
+                                                                  [[StringValue "Vi", StringValue "a"], 
+                                                                  [StringValue "Vi", StringValue "b"], 
+                                                                  [StringValue "Vi", StringValue "b"], 
+                                                                  [StringValue "Vi", StringValue "b"], 
+                                                                  [StringValue "Ed", StringValue "a"], 
+                                                                  [StringValue "Ed", StringValue "b"], 
+                                                                  [StringValue "Ed", StringValue "b"], 
+                                                                  [StringValue "Ed", StringValue "b"]])
+
+    it "executes SELECT statement with multiple tables and LESS THAN condition" $ do
+      let statement = Select ["employees.name", "flags.flag"] ["employees", "flags"] (Just (LessThanCondition "employees.name" (StringValue "flags.flag")))
+      Lib2.executeStatement statement `shouldBe` Right (DataFrame [Column "employees.name" StringType, Column "flags.flag" StringType] 
+                                                                  [[StringValue "Vi", StringValue "a"], 
+                                                                  [StringValue "Vi", StringValue "b"], 
+                                                                  [StringValue "Vi", StringValue "b"], 
+                                                                  [StringValue "Vi", StringValue "b"], 
+                                                                  [StringValue "Ed", StringValue "a"], 
+                                                                  [StringValue "Ed", StringValue "b"], 
+                                                                  [StringValue "Ed", StringValue "b"], 
+                                                                  [StringValue "Ed", StringValue "b"]])
+
+    it "executes SELECT statement with multiple tables and GREATER THAN condition" $ do
+      let statement = Select ["employees.name", "flags.flag"] ["employees", "flags"] (Just (GreaterThanCondition "employees.name" (StringValue "flags.flag")))
+      Lib2.executeStatement statement `shouldBe` Right (DataFrame [Column "employees.name" StringType, Column "flags.flag" StringType] [])
+    
+    it "executes SELECT statement with multiple tables and GREATER THAN OR EQAUL condition" $ do
+      let statement = Select ["employees.name", "flags.flag"] ["employees", "flags"] (Just (GreaterThanOrEqualCondition "employees.name" (StringValue "flags.flag")))
+      Lib2.executeStatement statement `shouldBe` Right (DataFrame [Column "employees.name" StringType, Column "flags.flag" StringType] [])
+    
+    it "executes SELECT statement with multiple tables and LESS THAN OR EQAUL condition" $ do
+      let statement = Select ["employees.name", "flags.flag"] ["employees", "flags"] (Just (LessThanOrEqualCondition "employees.name" (StringValue "flags.flag")))
+      Lib2.executeStatement statement `shouldBe` Right (DataFrame [Column "employees.name" StringType, Column "flags.flag" StringType] 
+                                                                  [[StringValue "Vi", StringValue "a"], 
+                                                                  [StringValue "Vi", StringValue "b"], 
+                                                                  [StringValue "Vi", StringValue "b"], 
+                                                                  [StringValue "Vi", StringValue "b"], 
+                                                                  [StringValue "Ed", StringValue "a"], 
+                                                                  [StringValue "Ed", StringValue "b"], 
+                                                                  [StringValue "Ed", StringValue "b"], 
+                                                                  [StringValue "Ed", StringValue "b"]])
+
+    it "executes SELECT statement with multiple tables and no WHERE condition" $ do
+      let statement = Select ["employees.name", "flags.flag"] ["employees", "flags"] Nothing
+      Lib2.executeStatement statement `shouldBe` Right (DataFrame [Column "employees.name" StringType,Column "flags.flag" StringType] 
+                                                                  [[StringValue "Vi",StringValue "a"],
+                                                                  [StringValue "Vi",StringValue "b"],
+                                                                  [StringValue "Vi",StringValue "b"],
+                                                                  [StringValue "Vi",StringValue "b"],
+                                                                  [StringValue "Ed",StringValue "a"],
+                                                                  [StringValue "Ed",StringValue "b"],
+                                                                  [StringValue "Ed",StringValue "b"],
+                                                                  [StringValue "Ed",StringValue "b"]])
