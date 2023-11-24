@@ -182,19 +182,19 @@ evalCondition (NotEqualCondition colName val) df row =
 evalCondition (LessThanOrEqualCondition colName val) df row =
   if '.' `elem` valWithDot val
     then handleComparisonJoin (<=) colName val df row
-    else matchValue (getColumnValue colName df row) val
+    else compareValues (<=) colName val df row
 evalCondition (GreaterThanOrEqualCondition colName val) df row =
   if '.' `elem` valWithDot val
     then handleComparisonJoin (>=) colName val df row
-    else matchValue (getColumnValue colName df row) val
+    else compareValues (>=) colName val df row
 evalCondition (LessThanCondition colName val) df row =
   if '.' `elem` valWithDot val
     then handleComparisonJoin (<) colName val df row
-    else matchValue (getColumnValue colName df row) val
+    else compareValues (<) colName val df row
 evalCondition (GreaterThanCondition colName val) df row =
   if '.' `elem` valWithDot val
     then handleComparisonJoin (>) colName val df row
-    else matchValue (getColumnValue colName df row) val
+    else compareValues (>) colName val df row
 evalCondition _ _ _ = False
 
 valWithDot :: Value -> String
