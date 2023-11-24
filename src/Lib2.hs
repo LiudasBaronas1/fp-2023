@@ -171,13 +171,44 @@ mergeDataFrames ((firstTableName, firstDF) : rest) =
 
 evalCondition :: Condition -> DataFrame -> Row -> Bool
 evalCondition (OrCondition conditions) df row = any (\cond -> evalCondition cond df row) conditions
-evalCondition (EqualCondition colName val) df row = matchValue (getColumnValue colName df row) val
-evalCondition (NotEqualCondition colName val) df row = not (matchValue (getColumnValue colName df row) val)
-evalCondition (LessThanOrEqualCondition colName val) df row = compareValues (<=) colName val df row
-evalCondition (GreaterThanOrEqualCondition colName val) df row = compareValues (>=) colName val df row
-evalCondition (LessThanCondition colName val) df row = compareValues (<) colName val df row
-evalCondition (GreaterThanCondition colName val) df row = compareValues (>) colName val df row
+evalCondition (EqualCondition colName val) df row =
+  if '.' `elem` valWithDot val
+    then handleComparisonJoin (==) colName val df row
+    else matchValue (getColumnValue colName df row) val
+evalCondition (NotEqualCondition colName val) df row =
+  if '.' `elem` valWithDot val
+    then not (handleComparisonJoin (==) colName val df row)
+    else not (matchValue (getColumnValue colName df row) val)
+evalCondition (LessThanOrEqualCondition colName val) df row =
+  if '.' `elem` valWithDot val
+    then handleComparisonJoin (<=) colName val df row
+    else matchValue (getColumnValue colName df row) val
+evalCondition (GreaterThanOrEqualCondition colName val) df row =
+  if '.' `elem` valWithDot val
+    then handleComparisonJoin (>=) colName val df row
+    else matchValue (getColumnValue colName df row) val
+evalCondition (LessThanCondition colName val) df row =
+  if '.' `elem` valWithDot val
+    then handleComparisonJoin (<) colName val df row
+    else matchValue (getColumnValue colName df row) val
+evalCondition (GreaterThanCondition colName val) df row =
+  if '.' `elem` valWithDot val
+    then handleComparisonJoin (>) colName val df row
+    else matchValue (getColumnValue colName df row) val
 evalCondition _ _ _ = False
+
+valWithDot :: Value -> String
+valWithDot (StringValue s) = s
+valWithDot _ = ""
+
+handleComparisonJoin :: (String -> String -> Bool) -> String -> Value -> DataFrame -> Row -> Bool
+handleComparisonJoin op colName val df row =
+  case val of
+    StringValue otherColName ->
+      case (getColumnValue colName df row, getColumnValue otherColName df row) of
+        (StringValue thisValue, StringValue otherValue) -> op thisValue otherValue
+        _ -> False
+    _ -> False
 
 matchValue :: Value -> Value -> Bool
 matchValue (StringValue s1) (StringValue s2) = map toLower s1 == map toLower s2
