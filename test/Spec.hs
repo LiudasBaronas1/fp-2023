@@ -57,23 +57,23 @@ main = hspec $ do
       Lib2.parseStatement "SHOW TABLE employees" `shouldBe` Right (ShowTable "employees")
   
     it "parses SELECT statement without WHERE clause" $ do
-      Lib2.parseStatement "SELECT * FROM employees" `shouldBe` Right (Select ["*"] "employees" Nothing)
+      Lib2.parseStatement "SELECT * FROM employees" `shouldBe` Right (Select ["*"] ["employees"] Nothing)
   
     it "parses SELECT statement with WHERE clause (string comparison)" $ do
       let statement = "SELECT name FROM employees WHERE name = Vi"
-      Lib2.parseStatement statement `shouldBe` Right (Select ["name"] "employees" (Just (EqualCondition "name" (StringValue "vi"))))
+      Lib2.parseStatement statement `shouldBe` Right (Select ["name"] ["employees"] (Just (EqualCondition "name" (StringValue "vi"))))
     
     it "parses SELECT statement with WHERE clause when its not equal (string comparison)" $ do
       let statement = "SELECT name FROM employees WHERE name <> Vi"
-      Lib2.parseStatement statement `shouldBe` Right (Select ["name"] "employees" (Just (NotEqualCondition "name" (StringValue "vi"))))  
+      Lib2.parseStatement statement `shouldBe` Right (Select ["name"] ["employees"] (Just (NotEqualCondition "name" (StringValue "vi"))))  
     
     it "parses SELECT statement with WHERE clause more or equal (equal) (string comparison)" $ do
       let statement = "SELECT name FROM employees WHERE name >= Vi"
-      Lib2.parseStatement statement `shouldBe` Right (Select ["name"] "employees" (Just (GreaterThanOrEqualCondition "name" (StringValue "vi"))))
+      Lib2.parseStatement statement `shouldBe` Right (Select ["name"] ["employees"] (Just (GreaterThanOrEqualCondition "name" (StringValue "vi"))))
     
     it "parses SELECT statement with WHERE clause more or equal (greater) (string comparison)" $ do
       let statement = "SELECT name FROM employees WHERE name >= ed"
-      Lib2.parseStatement statement `shouldBe` Right (Select ["name"] "employees" (Just (GreaterThanOrEqualCondition "name" (StringValue "ed"))))
+      Lib2.parseStatement statement `shouldBe` Right (Select ["name"] ["employees"] (Just (GreaterThanOrEqualCondition "name" (StringValue "ed"))))
 
     it "parses MAX statement" $ do
       Lib2.parseStatement "select MAX( name ) FROM employees" `shouldBe` Right (Max "name" "employees" "Max Value")
@@ -86,27 +86,27 @@ main = hspec $ do
     
     it "parses SELECT statement with WHERE OR clause (string comparison)" $ do
       let statement = "SELECT name FROM employees WHERE name = Vi or name = Ed"
-      Lib2.parseStatement statement `shouldBe` Right (Select ["name"] "employees" (Just (OrCondition [EqualCondition "name" (StringValue "vi"), EqualCondition "name" (StringValue "ed")])))
+      Lib2.parseStatement statement `shouldBe` Right (Select ["name"] ["employees"] (Just (OrCondition [EqualCondition "name" (StringValue "vi"), EqualCondition "name" (StringValue "ed")])))
   
     it "parses SELECT statement with multiple WHERE OR clauses (string comparison)" $ do
       let statement = "SELECT name FROM employees WHERE name = fakename or name = Ed or surname = Po"
-      Lib2.parseStatement statement `shouldBe` Right (Select ["name"] "employees" (Just (OrCondition [EqualCondition "name" (StringValue "fakename"), OrCondition [EqualCondition "name" (StringValue "ed"), EqualCondition "surname" (StringValue "po")]])))
+      Lib2.parseStatement statement `shouldBe` Right (Select ["name"] ["employees"] (Just (OrCondition [EqualCondition "name" (StringValue "fakename"), OrCondition [EqualCondition "name" (StringValue "ed"), EqualCondition "surname" (StringValue "po")]])))
   
     it "parses SELECT statement with WHERE OR clause when value is larger (string comparison)" $ do
       let statement = "SELECT name FROM employees WHERE id > 0"
-      Lib2.parseStatement statement `shouldBe` Right (Select ["name"] "employees" (Just (GreaterThanCondition "id" (StringValue "0"))))
+      Lib2.parseStatement statement `shouldBe` Right (Select ["name"] ["employees"] (Just (GreaterThanCondition "id" (StringValue "0"))))
   
     it "parses SELECT statement with WHERE OR clause when value is lesser (string comparison)" $ do
       let statement = "SELECT name FROM employees WHERE id < 0"
-      Lib2.parseStatement statement `shouldBe` Right (Select ["name"] "employees" (Just (LessThanCondition "id" (StringValue "0"))))
+      Lib2.parseStatement statement `shouldBe` Right (Select ["name"] ["employees"] (Just (LessThanCondition "id" (StringValue "0"))))
   
   describe "Lib2.executeStatement" $ do
     it "executes SELECT statement with WHERE clause (string comparison)" $ do
-      let statement = Select ["name"] "employees" (Just (EqualCondition "name" (StringValue "Vi")))
+      let statement = Select ["name"] ["employees"] (Just (EqualCondition "name" (StringValue "Vi")))
       Lib2.executeStatement statement `shouldBe` Right (DataFrame [Column "name" StringType] [[StringValue "Vi"]])
       
     it "executes SELECT statement without WHERE clause" $ do
-      let statement = Select ["*"] "employees" Nothing
+      let statement = Select ["*"] ["employees"] Nothing
       Lib2.executeStatement statement `shouldBe` Right (DataFrame [Column "id" IntegerType, Column "name" StringType, Column "surname" StringType] [[IntegerValue 1, StringValue "Vi", StringValue "Po"], [IntegerValue 2, StringValue "Ed", StringValue "Dl"]])
       
     it "executes MAX statement" $ do
@@ -118,28 +118,28 @@ main = hspec $ do
       Lib2.executeStatement statement `shouldBe` Right (DataFrame [Column "Average Value" IntegerType] [[IntegerValue 1]])
 
     it "executes SELECT statement with string NOT EQUAL condition" $ do
-      let statement = Select ["name"] "employees" (Just (NotEqualCondition "name" (StringValue "Ed")))
+      let statement = Select ["name"] ["employees"] (Just (NotEqualCondition "name" (StringValue "Ed")))
       Lib2.executeStatement statement `shouldBe` Right (DataFrame [Column "name" StringType] [[StringValue "Vi"]])
 
     it "executes SELECT statement with string EQUAL condition" $ do
-      let statement = Select ["name"] "employees" (Just (EqualCondition "name" (StringValue "vi")))
+      let statement = Select ["name"] ["employees"] (Just (EqualCondition "name" (StringValue "vi")))
       Lib2.executeStatement statement `shouldBe` Right (DataFrame [Column "name" StringType] [[StringValue "Vi"]])
     it "executes SELECT statement with string GREATER THAN condition" $ do
-      let statement = Select ["name"] "employees" (Just (GreaterThanCondition "name" (StringValue "Ed")))
+      let statement = Select ["name"] ["employees"] (Just (GreaterThanCondition "name" (StringValue "Ed")))
       Lib2.executeStatement statement `shouldBe` Right (DataFrame [Column "name" StringType] [[StringValue "Vi"]])
 
     it "executes SELECT statement with string LESS THAN condition" $ do
-      let statement = Select ["name"] "employees" (Just (LessThanCondition "name" (StringValue "Vi")))
+      let statement = Select ["name"] ["employees"] (Just (LessThanCondition "name" (StringValue "Vi")))
       Lib2.executeStatement statement `shouldBe` Right (DataFrame [Column "name" StringType] [[StringValue "Ed"]])
 
     it "executes SELECT statement with string GREATER THAN OR EQUAL condition" $ do
-      let statement = Select ["name"] "employees" (Just (GreaterThanOrEqualCondition "name" (StringValue "Vi")))
+      let statement = Select ["name"] ["employees"] (Just (GreaterThanOrEqualCondition "name" (StringValue "Vi")))
       Lib2.executeStatement statement `shouldBe` Right (DataFrame [Column "name" StringType] [[StringValue "Vi"]])
 
     it "executes SELECT statement with string LESS THAN OR EQUAL condition" $ do
-      let statement = Select ["name"] "employees" (Just (LessThanOrEqualCondition "name" (StringValue "Vi")))
+      let statement = Select ["name"] ["employees"] (Just (LessThanOrEqualCondition "name" (StringValue "Vi")))
       Lib2.executeStatement statement `shouldBe` Right (DataFrame [Column "name" StringType] [[StringValue "Vi"], [StringValue "Ed"]])
       
     it "executes SELECT statement with OR condition" $ do
-      let statement = Select ["name"] "employees" (Just (OrCondition [EqualCondition "name" (StringValue "Vi"), EqualCondition "name" (StringValue "Ed")]))
+      let statement = Select ["name"] ["employees"] (Just (OrCondition [EqualCondition "name" (StringValue "Vi"), EqualCondition "name" (StringValue "Ed")]))
       Lib2.executeStatement statement `shouldBe` Right (DataFrame [Column "name" StringType] [[StringValue "Vi"], [StringValue "Ed"]])
