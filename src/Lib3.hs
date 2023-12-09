@@ -77,6 +77,11 @@ executeSql sql = case parseStatement sql of
         let updatedDf = updateDataFrame existingData updates c
         saveFile n updatedDf
         return $ Right updatedDf
+      Delete n condition -> do
+        existingData <- loadFile n
+        let updatedDf = deleteDataFrame existingData condition
+        saveFile n updatedDf
+        return $ Right updatedDf
       _ -> do
         let result = executeStatement statement
         return $ case result of
@@ -102,6 +107,14 @@ executeSql sql = case parseStatement sql of
   filterDataFrame condition (DataFrame columns rows) =
     let filteredRows = filter (\row -> evalCondition condition (DataFrame columns [row]) row) rows
     in DataFrame columns filteredRows
+
+  deleteDataFrame :: Either ErrorMessage DataFrame -> Maybe Condition -> DataFrame
+  deleteDataFrame (Right (DataFrame existingColumns existingRows)) condition =
+    let updatedRows = case condition of
+          Just cond -> filter (\row -> not (evalCondition cond (DataFrame existingColumns [row]) row)) existingRows
+          Nothing -> []
+    in DataFrame existingColumns updatedRows
+  deleteDataFrame _ _ = error "Invalid data frame for delete"
 
 evalExpr :: Value -> Value
 evalExpr = id

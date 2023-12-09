@@ -48,20 +48,31 @@ data ParsedStatement
 
 parseStatement :: String -> Either ErrorMessage ParsedStatement
 parseStatement statement =
-  case words (map toLower statement) of
-    ["show", "tables"] -> Right ShowTables
-    ["show", "table", tableName] -> Right (ShowTable tableName)
-    ["select", "max(", columnName, ")", "from", tableName] -> Right (Max columnName tableName "Max Value")
-    ["select", "avg(", columnName, ")", "from", tableName] -> Right (Avg columnName tableName "Average Value")
-    ("select" : columns) ->
-      case break (== "from") columns of
-        (cols, "from" : rest) ->
-          let (tableNames, conditions) = parseTableNamesAndConditions rest
-          in Right (Select (splitColumns (unwords cols)) tableNames conditions)
-        _ -> Left "Invalid SELECT statement"
-    ["now()"] -> Right Now
-    ("insert" : rest) -> parseInsert rest 
-    _ -> Left "Not supported statement"
+  if lastChar == ';'
+    then case words (map toLower (init statement)) of
+      ["show", "tables"] -> Right ShowTables
+      ["show", "table", tableName] -> Right (ShowTable tableName)
+      ["select", "max(", columnName, ")", "from", tableName] -> Right (Max columnName tableName "Max Value")
+      ["select", "avg(", columnName, ")", "from", tableName] -> Right (Avg columnName tableName "Average Value")
+      ("select" : columns) ->
+        case break (== "from") columns of
+          (cols, "from" : rest) ->
+            let (tableNames, conditions) = parseTableNamesAndConditions rest
+            in Right (Select (splitColumns (unwords cols)) tableNames conditions)
+          _ -> Left "Invalid SELECT statement"
+      ["now()"] -> Right Now
+      ("insert" : rest) -> parseInsert rest
+      ("delete" : rest) -> parseDelete rest
+      _ -> Left "Not supported statement"
+    else Left "Statement must end with a semicolon"
+  where
+    lastChar = if null statement then ' ' else last statement
+
+parseDelete :: [String] -> Either ErrorMessage ParsedStatement
+parseDelete ("from" : tableName : rest) =
+  let (tableNames, conditions) = parseTableNamesAndConditions rest
+  in Right (Delete tableName conditions)
+parseDelete _ = Left "Invalid DELETE statement"
 
 parseInsert :: [String] -> Either ErrorMessage ParsedStatement
 parseInsert ("into" : tableName : rest) =
