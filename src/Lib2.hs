@@ -6,7 +6,11 @@ module Lib2
     executeStatement,
     ParsedStatement (..),
     Condition (..),
-    loadFile
+    evalCondition,
+    columnIndex,
+    columnName,
+    columnNames,
+    updateRow
   )
 where
 
@@ -41,13 +45,6 @@ data ParsedStatement
   | Insert String [String] [[String]]
   | Delete TableName (Maybe Condition)
   deriving (Show, Eq)
-data ExecutionAlgebra next 
-  = LoadFile TableName (Either ErrorMessage DataFrame -> next)
-  deriving Functor
-
-type Execution = Free ExecutionAlgebra
-loadFile :: TableName -> Execution (Either ErrorMessage DataFrame)
-loadFile name = liftF $ LoadFile name id
 
 parseStatement :: String -> Either ErrorMessage ParsedStatement
 parseStatement statement =
@@ -134,6 +131,58 @@ parseConditions (colName : op : value : rest) =
     combineCondition c Nothing = c
 
 executeStatement :: ParsedStatement -> Either ErrorMessage DataFrame
+executeStatement ShowTables = Right $ DataFrame [Column "Table Name" StringType] (map (\(name, _) -> [StringValue name]) database)
+executeStatement (ShowTable tablename) =
+  case lookup (map toLower tablename) database of
+    Just df -> Right $ DataFrame [Column "Column Name" StringType] (map (\col -> [StringValue (columnName col)]) (columns df))
+    Nothing -> Left "Table not found"
+executeStatement (Select columnNames tableNames maybeCondition) =
+  case mapM (\tableName -> lookup (map toLower tableName) database) tableNames of
+    Just dfs ->
+      case dfs of
+        [] -> Left "No tables provided"
+        [singleDF] -> do
+          let filteredRows = case maybeCondition of
+                Just condition -> filter (\row -> evalCondition condition singleDF row) (rows singleDF)
+                Nothing -> rows singleDF
+          let selectedCols = if "*" `elem` columnNames
+                             then columns singleDF
+                             else filter (\col -> columnName col `elem` columnNames) (columns singleDF)
+          let selectedIndices = map (columnIndex singleDF) selectedCols
+          let selectedRows = map (\row -> map (\i -> row !! i) selectedIndices) filteredRows
+          Right $ DataFrame selectedCols selectedRows
+        multipleDFs -> do
+          let mergedDF = mergeDataFrames (zip tableNames dfs)
+          let filteredRows = case maybeCondition of
+                  Just condition -> filter (\row -> evalCondition condition mergedDF row) (rows mergedDF)
+                  Nothing -> rows mergedDF
+          let selectedCols = if "*" `elem` columnNames
+                             then columns mergedDF
+                             else filter (\col -> columnName col `elem` columnNames) (columns mergedDF)
+          let selectedIndices = map (columnIndex mergedDF) selectedCols
+          let selectedRows = map (\row -> map (\i -> row !! i) selectedIndices) filteredRows
+          Right $ DataFrame selectedCols selectedRows
+    Nothing -> Left "Table not found"
+executeStatement (Max columnName tableName resultColumn) =
+  case lookup (map toLower tableName) database of
+    Just df -> do
+      let colIndex = columnIndex df (Column columnName StringType)
+      let nonNullRows = filter (\row -> case row !! colIndex of { NullValue -> False; _ -> True }) (rows df)
+      let maxVal = case nonNullRows of
+                     [] -> NullValue
+                     _ -> foldl1 (maxValue colIndex (columnType (columns df !! colIndex))) (map (!! colIndex) nonNullRows)
+      Right $ DataFrame [Column resultColumn (columnType (columns df !! colIndex))] [[maxVal]]
+    Nothing -> Left "Table not found"
+executeStatement (Avg columnName tableName resultColumn) =
+  case lookup (map toLower tableName) database of
+    Just df -> do
+      let colIndex = columnIndex df (Column columnName StringType)
+      let nonNullRows = filter (\row -> case row !! colIndex of { NullValue -> False; _ -> True }) (rows df)
+      let avgVal = case nonNullRows of
+                     [] -> NullValue
+                     _ -> calculateAverage colIndex nonNullRows
+      Right $ DataFrame [Column resultColumn (columnType (columns df !! colIndex))] [[avgVal]]
+    Nothing -> Left "Table not found"
 executeStatement _ = Left "Unsupported statement"
 
 mergeDataFrames :: [(TableName, DataFrame)] -> DataFrame

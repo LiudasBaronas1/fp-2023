@@ -20,8 +20,8 @@ where
 import Control.Monad.Free (Free (..), liftF)
 import DataFrame (DataFrame(..), Column(..), ColumnType(..), Value(..), Row(..))
 import Data.Time ( UTCTime )
-import Lib2 (parseStatement, executeStatement, ParsedStatement(..))
-import Data.List (transpose, intercalate)
+import Lib2 --(parseStatement, executeStatement, ParsedStatement(..), Condition(..), evalCondition, updateRow)
+import Data.List (transpose, intercalate, isPrefixOf, find, elemIndex, foldl')
 import Data.Aeson hiding (Value)
 import Data.Aeson (encode, decode)
 import qualified Data.Text as T
@@ -30,6 +30,9 @@ import qualified Data.ByteString.Lazy.Char8 as BS
 import Control.Applicative ((<|>))
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath ((</>), takeDirectory)
+import InMemoryTables (database)
+import Data.Char (toLower, isSpace)
+import Data.Maybe (fromJust, fromMaybe)
 
 type TableName = String
 type FileContent = Either ErrorMessage DataFrame
@@ -68,6 +71,12 @@ executeSql sql = case parseStatement sql of
         let mergedDf = mergeDataFrames existingData df
         saveFile n mergedDf
         return $ Right mergedDf
+      Update n u c -> do
+        existingData <- loadFile n
+        let updates = map (\(colName, expr) -> (colName, evalExpr expr)) u
+        let updatedDf = updateDataFrame existingData updates c
+        saveFile n updatedDf
+        return $ Right updatedDf
       _ -> do
         let result = executeStatement statement
         return $ case result of
@@ -79,6 +88,23 @@ executeSql sql = case parseStatement sql of
     DataFrame existingColumns (existingRows ++ newRows)
   mergeDataFrames _ newDf = newDf
 
+  updateDataFrame :: Either ErrorMessage DataFrame -> [(String, Value)] -> Maybe Condition -> DataFrame
+  updateDataFrame (Right (DataFrame existingColumns existingRows)) updates condition =
+    let columnsToUpdate = map (\(colName, _) -> Column colName StringType) updates
+        updatedRows = map (\row -> updateRow columnsToUpdate updates row) existingRows
+        updatedData = DataFrame existingColumns updatedRows
+    in case condition of
+      Just cond -> filterDataFrame cond updatedData
+      Nothing -> updatedData
+  updateDataFrame _ _ _ = error "Invalid data frame for update"
+
+  filterDataFrame :: Condition -> DataFrame -> DataFrame
+  filterDataFrame condition (DataFrame columns rows) =
+    let filteredRows = filter (\row -> evalCondition condition (DataFrame columns [row]) row) rows
+    in DataFrame columns filteredRows
+
+evalExpr :: Value -> Value
+evalExpr = id
 
 -- insert works correctly only like this: insert employees id, name values (1,john), (2,mike)
 
