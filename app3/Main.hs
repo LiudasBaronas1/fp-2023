@@ -1,8 +1,13 @@
 module Main (main) where
 
 import Control.Monad.IO.Class (MonadIO (liftIO))
+import DataFrame (DataFrame(..), Column(..), ColumnType(..), Value(..), Row(..))
 import Control.Monad.Free (Free (..))
-
+import Data.Aeson (encode, decode)
+import System.FilePath ((</>))
+import qualified Data.ByteString.Lazy.Char8 as BS
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
 import Data.Functor((<&>))
 import Data.Time ( UTCTime, getCurrentTime )
 import Data.List qualified as L
@@ -17,6 +22,8 @@ import System.Console.Repline
     evalRepl,
   )
 import System.Console.Terminal.Size (Window, size, width)
+import System.FilePath (dropExtension, pathSeparator, takeExtension)
+import System.Directory (listDirectory, doesFileExist)
 
 type Repl a = HaskelineT IO a
 
@@ -66,3 +73,19 @@ runExecuteIO (Free step) = do
         -- probably you will want to extend the interpreter
         runStep :: Lib3.ExecutionAlgebra a -> IO a
         runStep (Lib3.GetTime next) = getCurrentTime >>= return . next
+        runStep (Lib3.LoadFile table_name next) = do
+          let filePath = "db" ++ [pathSeparator] ++ table_name ++ ".json"
+          fileExists <- doesFileExist filePath
+          result <- if fileExists
+            then do
+              jsonData <- readFile filePath
+              let decodedData = decode (BS.fromStrict $ TE.encodeUtf8 $ T.pack jsonData) :: Maybe DataFrame
+              case decodedData of
+                Just df -> return $ next $ Right df
+                Nothing -> return $ next $ Left "Wrong data format"
+            else return $ next $ Left ("Table " ++ table_name ++ " does not exist.")
+          return result
+        runStep (Lib3.SaveFile tableName df next) = do
+          writeFile ("db" ++ [pathSeparator] ++ tableName ++ ".json") (Lib3.dataFrameToJson df)
+          return $ next 
+

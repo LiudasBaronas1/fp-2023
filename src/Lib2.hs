@@ -1,19 +1,21 @@
 {-# OPTIONS_GHC -Wno-unused-top-binds #-}
+{-# LANGUAGE DeriveFunctor #-}
 
 module Lib2
   ( parseStatement,
     executeStatement,
     ParsedStatement (..),
-    Condition (..)
+    Condition (..),
+    loadFile
   )
 where
 
+import Control.Monad.Free (Free (..), liftF)
 import DataFrame (Column (..), ColumnType (..), Value (..), DataFrame (..), Row (..))
 import InMemoryTables (TableName, database)
 import Data.List (isPrefixOf, find, elemIndex, foldl')
 import Data.Char (toLower, isSpace)
-import Data.Maybe (fromJust)
-
+import Data.Maybe (fromJust, fromMaybe)
 type ErrorMessage = String
 type Database = [(TableName, DataFrame)]
 
@@ -34,8 +36,19 @@ data ParsedStatement
   | Max String TableName String
   | Avg String TableName String
   | Now
+  | UnknownStatement
+  | Update TableName [(String, Value)] (Maybe Condition)
+  | Insert String [String] [[String]]
+  | Delete TableName (Maybe Condition)
   deriving (Show, Eq)
-  
+data ExecutionAlgebra next 
+  = LoadFile TableName (Either ErrorMessage DataFrame -> next)
+  deriving Functor
+
+type Execution = Free ExecutionAlgebra
+loadFile :: TableName -> Execution (Either ErrorMessage DataFrame)
+loadFile name = liftF $ LoadFile name id
+
 parseStatement :: String -> Either ErrorMessage ParsedStatement
 parseStatement statement =
   case words (map toLower statement) of
@@ -50,7 +63,30 @@ parseStatement statement =
           in Right (Select (splitColumns (unwords cols)) tableNames conditions)
         _ -> Left "Invalid SELECT statement"
     ["now()"] -> Right Now
+    ("insert" : rest) -> parseInsert rest 
     _ -> Left "Not supported statement"
+
+parseInsert :: [String] -> Either ErrorMessage ParsedStatement
+parseInsert ("into" : tableName : rest) =
+  case break (== "values") rest of
+    (columnNames, "values" : values) ->
+      let columns = splitColumns (unwords columnNames)
+          rows = map (splitColumns . removePunctuation) values
+      in
+        if all (\row -> length columns == length row) rows
+          then Right (Insert tableName columns rows)
+          else Left "Number of columns and values mismatch in INSERT statement"
+    _ -> Left "Invalid INSERT statement"
+parseInsert _ = Left "Invalid INSERT statement"
+
+removePunctuation :: String -> String
+removePunctuation = filter (\c -> c /= '(' && c /= ')')
+
+parseMultipleRows :: [String] -> [[String]]
+parseMultipleRows [] = []
+parseMultipleRows values =
+  case break (== "),") values of
+    (row, rest) -> splitColumns (unwords row) : parseMultipleRows (drop 1 rest)
 
 parseTableNamesAndConditions :: [String] -> ([TableName], Maybe Condition)
 parseTableNamesAndConditions [] = ([], Nothing)
@@ -98,58 +134,7 @@ parseConditions (colName : op : value : rest) =
     combineCondition c Nothing = c
 
 executeStatement :: ParsedStatement -> Either ErrorMessage DataFrame
-executeStatement ShowTables = Right $ DataFrame [Column "Table Name" StringType] (map (\(name, _) -> [StringValue name]) database)
-executeStatement (ShowTable tablename) =
-  case lookup (map toLower tablename) database of
-    Just df -> Right $ DataFrame [Column "Column Name" StringType] (map (\col -> [StringValue (columnName col)]) (columns df))
-    Nothing -> Left "Table not found"
-executeStatement (Select columnNames tableNames maybeCondition) =
-  case mapM (\tableName -> lookup (map toLower tableName) database) tableNames of
-    Just dfs ->
-      case dfs of
-        [] -> Left "No tables provided"
-        [singleDF] -> do
-          let filteredRows = case maybeCondition of
-                Just condition -> filter (\row -> evalCondition condition singleDF row) (rows singleDF)
-                Nothing -> rows singleDF
-          let selectedCols = if "*" `elem` columnNames
-                             then columns singleDF
-                             else filter (\col -> columnName col `elem` columnNames) (columns singleDF)
-          let selectedIndices = map (columnIndex singleDF) selectedCols
-          let selectedRows = map (\row -> map (\i -> row !! i) selectedIndices) filteredRows
-          Right $ DataFrame selectedCols selectedRows
-        multipleDFs -> do
-          let mergedDF = mergeDataFrames (zip tableNames dfs)
-          let filteredRows = case maybeCondition of
-                  Just condition -> filter (\row -> evalCondition condition mergedDF row) (rows mergedDF)
-                  Nothing -> rows mergedDF
-          let selectedCols = if "*" `elem` columnNames
-                             then columns mergedDF
-                             else filter (\col -> columnName col `elem` columnNames) (columns mergedDF)
-          let selectedIndices = map (columnIndex mergedDF) selectedCols
-          let selectedRows = map (\row -> map (\i -> row !! i) selectedIndices) filteredRows
-          Right $ DataFrame selectedCols selectedRows
-    Nothing -> Left "Table not found"
-executeStatement (Max columnName tableName resultColumn) =
-  case lookup (map toLower tableName) database of
-    Just df -> do
-      let colIndex = columnIndex df (Column columnName StringType)
-      let nonNullRows = filter (\row -> case row !! colIndex of { NullValue -> False; _ -> True }) (rows df)
-      let maxVal = case nonNullRows of
-                     [] -> NullValue
-                     _ -> foldl1 (maxValue colIndex (columnType (columns df !! colIndex))) (map (!! colIndex) nonNullRows)
-      Right $ DataFrame [Column resultColumn (columnType (columns df !! colIndex))] [[maxVal]]
-    Nothing -> Left "Table not found"
-executeStatement (Avg columnName tableName resultColumn) =
-  case lookup (map toLower tableName) database of
-    Just df -> do
-      let colIndex = columnIndex df (Column columnName StringType)
-      let nonNullRows = filter (\row -> case row !! colIndex of { NullValue -> False; _ -> True }) (rows df)
-      let avgVal = case nonNullRows of
-                     [] -> NullValue
-                     _ -> calculateAverage colIndex nonNullRows
-      Right $ DataFrame [Column resultColumn (columnType (columns df !! colIndex))] [[avgVal]]
-    Nothing -> Left "Table not found"
+executeStatement _ = Left "Unsupported statement"
 
 mergeDataFrames :: [(TableName, DataFrame)] -> DataFrame
 mergeDataFrames [] = error "No data frames to merge"
@@ -266,3 +251,30 @@ columns (DataFrame cols _) = cols
 
 columnName :: Column -> String
 columnName (Column name _) = name
+
+parseUpdates :: [String] -> ([(String, Value)], [String])
+parseUpdates [] = ([], [])
+parseUpdates (colName : "=" : value : rest) =
+  let (updates, remaining) = parseUpdates rest
+  in ((colName, parseValue value) : updates, remaining)
+parseUpdates _ = ([], [])
+
+-- Helper function to parse the values list in the INSERT statement
+parseValues :: [String] -> [(String, Value)]
+parseValues [] = []
+parseValues (value : rest) =
+  let values = parseValues rest
+  in (value, parseValue value) : values
+
+-- Helper function to parse a single value
+parseValue :: String -> Value
+parseValue s = StringValue s
+
+-- Helper function to update a row with the given updates
+updateRow :: [Column] -> [(String, Value)] -> Row -> Row
+updateRow _ [] row = row
+updateRow columnsToUpdate ((colName, newValue) : updates) row =
+  let colIndex = fromMaybe (error "Column not found") (elemIndex (Column colName StringType) columnsToUpdate)
+      updatedRow = take colIndex row ++ [newValue] ++ drop (colIndex + 1) row
+  in updateRow columnsToUpdate updates updatedRow
+
