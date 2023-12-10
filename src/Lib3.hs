@@ -43,9 +43,13 @@ data ExecutionAlgebra next
   = LoadFile TableName (Either ErrorMessage DataFrame -> next)
   | GetTime (UTCTime -> next)
   | SaveFile TableName DataFrame next
+  | GetTables ([TableName] -> next)
   deriving Functor
 
 type Execution = Free ExecutionAlgebra
+
+getTables :: Execution [TableName]
+getTables = liftF $ GetTables id
 
 loadFile :: TableName -> Execution (Either ErrorMessage DataFrame)
 loadFile name = liftF $ LoadFile name id
@@ -61,6 +65,14 @@ executeSql sql = case parseStatement sql of
       Now -> do
         currentTime <- getTime
         return $ Right $ DataFrame [Column "CurrentTime" StringType] [[StringValue (show currentTime)]]
+      ShowTables -> do
+        tableNames <- getTables
+        return $ Right $ DataFrame [Column "Tables" StringType] (map (\name -> [StringValue name]) tableNames)
+      ShowTable tableName -> do
+        result <- loadFile tableName
+        case result of
+          Left err -> return $ Left err
+          Right (DataFrame cols _) -> return $ Right (DataFrame [Column "Columns" StringType] (map (\(Column name _) -> [StringValue name]) cols))
       Insert n c v -> do
         currentTime <- getTime
         existingData <- loadFile n
@@ -82,6 +94,48 @@ executeSql sql = case parseStatement sql of
         let updatedDf = deleteDataFrame existingData condition
         saveFile n updatedDf
         return $ Right updatedDf
+      Select columnNames tableNames maybeCondition -> do
+        loadedDataList <- mapM loadFile tableNames
+        let dfs = sequence loadedDataList
+        case dfs of
+          Right loadedTables -> do
+            let mergedDF = mergeSelectDataFrames (zip tableNames loadedTables)
+            let filteredRows = case maybeCondition of
+                  Just condition -> filter (\row -> evalCondition condition mergedDF row) (rows mergedDF)
+                  Nothing -> rows mergedDF
+            let selectedCols = if "*" `elem` columnNames
+                                then columns mergedDF
+                                else filter (\col -> columnName col `elem` columnNames) (columns mergedDF)
+            let selectedIndices = map (columnIndex mergedDF) selectedCols
+            let selectedRows = map (\row -> map (\i -> row !! i) selectedIndices) filteredRows
+            return $ Right $ DataFrame selectedCols selectedRows
+          Left errMsg -> return $ Left errMsg
+      Max columnName tableName resultColumn -> do
+        loadedDataList <- mapM loadFile [tableName]
+        let dfs = sequence loadedDataList
+        case dfs of
+          Right loadedTables -> do
+            let df = mergeSelectDataFrames [(tableName, head loadedTables)]
+            let colIndex = columnIndex df (Column columnName StringType)
+            let nonNullRows = filter (\row -> case row !! colIndex of { NullValue -> False; _ -> True }) (rows df)
+            let maxVal = case nonNullRows of
+                          [] -> NullValue
+                          _ -> foldl1 (maxValue colIndex (columnType (columns df !! colIndex))) (map (!! colIndex) nonNullRows)
+            return $ Right $ DataFrame [Column resultColumn (columnType (columns df !! colIndex))] [[maxVal]]
+          Left errMsg -> return $ Left errMsg
+      Avg columnName tableName resultColumn -> do
+        loadedDataList <- mapM loadFile [tableName]
+        let dfs = sequence loadedDataList
+        case dfs of
+          Right loadedTables -> do
+            let df = mergeSelectDataFrames [(tableName, head loadedTables)]
+            let colIndex = columnIndex df (Column columnName StringType)
+            let nonNullRows = filter (\row -> case row !! colIndex of { NullValue -> False; _ -> True }) (rows df)
+            let avgVal = case nonNullRows of
+                          [] -> NullValue
+                          _  -> calculateAverage colIndex nonNullRows
+            return $ Right $ DataFrame [Column resultColumn (columnType (columns df !! colIndex))] [[avgVal]]
+          Left errMsg -> return $ Left errMsg
       _ -> do
         let result = executeStatement statement
         return $ case result of

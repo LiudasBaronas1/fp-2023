@@ -1,1 +1,0 @@
-{ "columns": [{ "name": "id", "type": "string" }, { "name": "name", "type": "string" }, { "name": "surname", "type": "string" }], "rows": [] }

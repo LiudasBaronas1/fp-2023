@@ -10,7 +10,13 @@ module Lib2
     columnIndex,
     columnName,
     columnNames,
-    updateRow
+    updateRow,
+    mergeSelectDataFrames,
+    columns,
+    rows,
+    maxValue,
+    columnType,
+    calculateAverage
   )
 where
 
@@ -54,19 +60,29 @@ parseStatement statement =
       ["show", "table", tableName] -> Right (ShowTable tableName)
       ["select", "max(", columnName, ")", "from", tableName] -> Right (Max columnName tableName "Max Value")
       ["select", "avg(", columnName, ")", "from", tableName] -> Right (Avg columnName tableName "Average Value")
-      ("select" : columns) ->
+{-      ("select" : columns) ->
         case break (== "from") columns of
           (cols, "from" : rest) ->
             let (tableNames, conditions) = parseTableNamesAndConditions rest
             in Right (Select (splitColumns (unwords cols)) tableNames conditions)
-          _ -> Left "Invalid SELECT statement"
-      ["now()"] -> Right Now
+          _ -> Left "Invalid SELECT statement"-}
+      ["select now()"] -> Right Now
       ("insert" : rest) -> parseInsert rest
       ("delete" : rest) -> parseDelete rest
+      ("select" : rest) -> parseSelect rest
       _ -> Left "Not supported statement"
     else Left "Statement must end with a semicolon"
   where
     lastChar = if null statement then ' ' else last statement
+    
+parseSelect :: [String] -> Either ErrorMessage ParsedStatement
+parseSelect (columns) =
+  case break (== "from") columns of
+    (cols, "from" : rest) ->
+      let (tableNames, conditions) = parseTableNamesAndConditions rest
+      in Right (Select (splitColumns (unwords cols)) tableNames conditions)
+    _ -> Left "Invalid SELECT statement"
+parseSelect _ = Left "Invalid SELECT statement"
 
 parseDelete :: [String] -> Either ErrorMessage ParsedStatement
 parseDelete ("from" : tableName : rest) =
@@ -142,12 +158,12 @@ parseConditions (colName : op : value : rest) =
     combineCondition c Nothing = c
 
 executeStatement :: ParsedStatement -> Either ErrorMessage DataFrame
-executeStatement ShowTables = Right $ DataFrame [Column "Table Name" StringType] (map (\(name, _) -> [StringValue name]) database)
+{-executeStatement ShowTables = Right $ DataFrame [Column "Table Name" StringType] (map (\(name, _) -> [StringValue name]) database)
 executeStatement (ShowTable tablename) =
   case lookup (map toLower tablename) database of
     Just df -> Right $ DataFrame [Column "Column Name" StringType] (map (\col -> [StringValue (columnName col)]) (columns df))
     Nothing -> Left "Table not found"
-executeStatement (Select columnNames tableNames maybeCondition) =
+executeStatement (Select columnNames tableNames maybeCondition) = 
   case mapM (\tableName -> lookup (map toLower tableName) database) tableNames of
     Just dfs ->
       case dfs of
@@ -163,7 +179,7 @@ executeStatement (Select columnNames tableNames maybeCondition) =
           let selectedRows = map (\row -> map (\i -> row !! i) selectedIndices) filteredRows
           Right $ DataFrame selectedCols selectedRows
         multipleDFs -> do
-          let mergedDF = mergeDataFrames (zip tableNames dfs)
+          let mergedDF = mergeSelectDataFrames (zip tableNames dfs)
           let filteredRows = case maybeCondition of
                   Just condition -> filter (\row -> evalCondition condition mergedDF row) (rows mergedDF)
                   Nothing -> rows mergedDF
@@ -193,12 +209,12 @@ executeStatement (Avg columnName tableName resultColumn) =
                      [] -> NullValue
                      _ -> calculateAverage colIndex nonNullRows
       Right $ DataFrame [Column resultColumn (columnType (columns df !! colIndex))] [[avgVal]]
-    Nothing -> Left "Table not found"
+    Nothing -> Left "Table not found"-}
 executeStatement _ = Left "Unsupported statement"
 
-mergeDataFrames :: [(TableName, DataFrame)] -> DataFrame
-mergeDataFrames [] = error "No data frames to merge"
-mergeDataFrames ((firstTableName, firstDF) : rest) =
+mergeSelectDataFrames :: [(TableName, DataFrame)] -> DataFrame
+mergeSelectDataFrames [] = error "No data frames to merge"
+mergeSelectDataFrames ((firstTableName, firstDF) : rest) =
   let mergeTwoDF :: TableName -> DataFrame -> DataFrame -> DataFrame
       mergeTwoDF currentTable nextDF mergedDF =
         let prefixedNextDF = addTablePrefix currentTable nextDF
@@ -281,7 +297,7 @@ calculateAverage :: Int -> [Row] -> Value
 calculateAverage colIndex rows =
   let total = sum [case row !! colIndex of { IntegerValue i -> i; _ -> 0 } | row <- rows]
       count = toInteger (length rows)
-  in if count > 0 then IntegerValue (total `div` count) else NullValue
+  in if count > 0 then IntegerValue (fromIntegral total `div` fromIntegral count) else NullValue
 
 maxValue :: Int -> ColumnType -> Value -> Value -> Value
 maxValue _ IntegerType (IntegerValue i1) (IntegerValue i2) = if i1 > i2 then IntegerValue i1 else IntegerValue i2
