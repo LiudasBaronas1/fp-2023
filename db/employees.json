@@ -1,0 +1,1 @@
+{ "columns": [{ "name": "id", "type": "string" }, { "name": "name", "type": "string" }, { "name": "surname", "type": "string" }], "rows": [[{"IntegerValue":1}, {"StringValue":"john"}, {"StringValue":"doe"}], [{"IntegerValue":2}, {"StringValue":"jane"}, {"StringValue":"doe"}]] }

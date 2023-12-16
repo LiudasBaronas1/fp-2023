@@ -23,7 +23,7 @@ where
 import Control.Monad.Free (Free (..), liftF)
 import DataFrame (Column (..), ColumnType (..), Value (..), DataFrame (..), Row (..))
 import InMemoryTables (TableName, database)
-import Data.List (isPrefixOf, find, elemIndex, foldl')
+import Data.List (isPrefixOf, find, elemIndex, foldl', findIndex)
 import Data.Char (toLower, isSpace)
 import Data.Maybe (fromJust, fromMaybe)
 type ErrorMessage = String
@@ -46,6 +46,7 @@ data ParsedStatement
   | Max String TableName String
   | Avg String TableName String
   | Now
+  | SelectWithNow [String] [String] (Maybe Condition)  -- Added a new constructor for SELECT with now()
   | UnknownStatement
   | Update TableName [(String, Value)] (Maybe Condition)
   | Insert String [String] [[String]]
@@ -70,17 +71,21 @@ parseStatement statement =
       ("insert" : rest) -> parseInsert rest
       ("delete" : rest) -> parseDelete rest
       ("select" : rest) -> parseSelect rest
+      ("update" : rest) -> parseUpdate rest
       _ -> Left "Not supported statement"
     else Left "Statement must end with a semicolon"
   where
     lastChar = if null statement then ' ' else last statement
     
 parseSelect :: [String] -> Either ErrorMessage ParsedStatement
-parseSelect (columns) =
+parseSelect columns =
   case break (== "from") columns of
     (cols, "from" : rest) ->
       let (tableNames, conditions) = parseTableNamesAndConditions rest
-      in Right (Select (splitColumns (unwords cols)) tableNames conditions)
+          selectCols = splitColumns (unwords cols)
+      in if "now()" `elem` selectCols
+           then Right (SelectWithNow selectCols tableNames conditions)
+           else Right (Select selectCols tableNames conditions)
     _ -> Left "Invalid SELECT statement"
 parseSelect _ = Left "Invalid SELECT statement"
 
@@ -102,6 +107,25 @@ parseInsert ("into" : tableName : rest) =
           else Left "Number of columns and values mismatch in INSERT statement"
     _ -> Left "Invalid INSERT statement"
 parseInsert _ = Left "Invalid INSERT statement"
+
+parseUpdate :: [String] -> Either ErrorMessage ParsedStatement
+parseUpdate (tableName : "set" : rest) =
+  case break (== "where") rest of
+    (updates, "where" : conditions) -> do
+      let updateList = parseUpdateList updates
+      let (condition, _) = parseConditions conditions
+      return $ Update tableName updateList condition
+    (updates, []) -> do
+      let updateList = parseUpdateList updates
+      return $ Update tableName updateList Nothing
+    _ -> Left "Invalid UPDATE statement"
+parseUpdate _ = Left "Invalid UPDATE statement"
+
+parseUpdateList :: [String] -> [(String, Value)]
+parseUpdateList [] = []
+parseUpdateList (colName : "=" : value : rest) =
+  (colName, parseValue value) : parseUpdateList rest
+parseUpdateList _ = []
 
 removePunctuation :: String -> String
 removePunctuation = filter (\c -> c /= '(' && c /= ')')
@@ -158,7 +182,7 @@ parseConditions (colName : op : value : rest) =
     combineCondition c Nothing = c
 
 executeStatement :: ParsedStatement -> Either ErrorMessage DataFrame
-{-executeStatement ShowTables = Right $ DataFrame [Column "Table Name" StringType] (map (\(name, _) -> [StringValue name]) database)
+executeStatement ShowTables = Right $ DataFrame [Column "Table Name" StringType] (map (\(name, _) -> [StringValue name]) database)
 executeStatement (ShowTable tablename) =
   case lookup (map toLower tablename) database of
     Just df -> Right $ DataFrame [Column "Column Name" StringType] (map (\col -> [StringValue (columnName col)]) (columns df))
@@ -209,7 +233,7 @@ executeStatement (Avg columnName tableName resultColumn) =
                      [] -> NullValue
                      _ -> calculateAverage colIndex nonNullRows
       Right $ DataFrame [Column resultColumn (columnType (columns df !! colIndex))] [[avgVal]]
-    Nothing -> Left "Table not found"-}
+    Nothing -> Left "Table not found"
 executeStatement _ = Left "Unsupported statement"
 
 mergeSelectDataFrames :: [(TableName, DataFrame)] -> DataFrame
@@ -295,8 +319,9 @@ compareValues op colName val df row =
 
 calculateAverage :: Int -> [Row] -> Value
 calculateAverage colIndex rows =
-  let total = sum [case row !! colIndex of { IntegerValue i -> i; _ -> 0 } | row <- rows]
-      count = toInteger (length rows)
+  let nonNullRows = filter (\row -> case row !! colIndex of { NullValue -> False; _ -> True }) rows
+      total = sum [case row !! colIndex of { IntegerValue i -> i; _ -> 0 } | row <- nonNullRows]
+      count = toInteger (length nonNullRows)
   in if count > 0 then IntegerValue (fromIntegral total `div` fromIntegral count) else NullValue
 
 maxValue :: Int -> ColumnType -> Value -> Value -> Value
@@ -328,13 +353,6 @@ columns (DataFrame cols _) = cols
 columnName :: Column -> String
 columnName (Column name _) = name
 
-parseUpdates :: [String] -> ([(String, Value)], [String])
-parseUpdates [] = ([], [])
-parseUpdates (colName : "=" : value : rest) =
-  let (updates, remaining) = parseUpdates rest
-  in ((colName, parseValue value) : updates, remaining)
-parseUpdates _ = ([], [])
-
 -- Helper function to parse the values list in the INSERT statement
 parseValues :: [String] -> [(String, Value)]
 parseValues [] = []
@@ -348,9 +366,11 @@ parseValue s = StringValue s
 
 -- Helper function to update a row with the given updates
 updateRow :: [Column] -> [(String, Value)] -> Row -> Row
-updateRow _ [] row = row
+updateRow columnsToUpdate [] row = row
 updateRow columnsToUpdate ((colName, newValue) : updates) row =
-  let colIndex = fromMaybe (error "Column not found") (elemIndex (Column colName StringType) columnsToUpdate)
-      updatedRow = take colIndex row ++ [newValue] ++ drop (colIndex + 1) row
-  in updateRow columnsToUpdate updates updatedRow
-
+  case findIndex (\col -> columnName col == colName) columnsToUpdate of
+    Just colIndex ->
+      let updatedRow = take colIndex row ++ [newValue] ++ drop (colIndex + 1) row
+      in updateRow columnsToUpdate updates updatedRow
+    Nothing ->
+      updateRow columnsToUpdate updates row

@@ -31,7 +31,7 @@ import Control.Applicative ((<|>))
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath ((</>), takeDirectory)
 import InMemoryTables (database)
-import Data.Char (toLower, isSpace)
+import Data.Char (toLower, isSpace, isDigit)
 import Data.Maybe (fromJust, fromMaybe)
 
 type TableName = String
@@ -78,7 +78,7 @@ executeSql sql = case parseStatement sql of
         existingData <- loadFile n
         let columnNames = if null c then [n] else c
         let columns = map (\colName -> Column colName StringType) columnNames
-        let values = map (\row -> map StringValue row) v
+        let values = map (\row -> map (uncurry parseValue) $ zip columnNames row) v
         let df = DataFrame columns values
         let mergedDf = mergeDataFrames existingData df
         saveFile n mergedDf
@@ -94,6 +94,23 @@ executeSql sql = case parseStatement sql of
         let updatedDf = deleteDataFrame existingData condition
         saveFile n updatedDf
         return $ Right updatedDf
+      SelectWithNow columnNames tableNames maybeCondition -> do
+        currentTime <- getTime
+        loadedDataList <- mapM loadFile tableNames
+        let dfs = sequence loadedDataList
+        case dfs of
+          Right loadedTables -> do
+            let mergedDF = mergeSelectDataFrames (zip tableNames loadedTables)
+            let filteredRows = case maybeCondition of
+                  Just condition -> filter (\row -> evalCondition condition mergedDF row) (rows mergedDF)
+                  Nothing -> rows mergedDF
+            let selectedCols = if "*" `elem` columnNames
+                                then columns mergedDF
+                                else filter (\col -> columnName col `elem` columnNames) (columns mergedDF)
+            let selectedIndices = map (columnIndex mergedDF) selectedCols
+            let selectedRows = map (\row -> map (\i -> if columnNames !! i == "now()" then StringValue (show currentTime) else row !! i) selectedIndices ++ [StringValue (show currentTime)]) filteredRows
+            return $ Right $ DataFrame (selectedCols ++ [Column "CurrentTime" StringType]) selectedRows
+          Left errMsg -> return $ Left errMsg
       Select columnNames tableNames maybeCondition -> do
         loadedDataList <- mapM loadFile tableNames
         let dfs = sequence loadedDataList
@@ -142,6 +159,11 @@ executeSql sql = case parseStatement sql of
           Left err -> Left err
           Right df -> Right df
   where
+  parseValue :: String -> String -> Value
+  parseValue colName str
+    | all isDigit str = IntegerValue (read str)
+    | map toLower str == "true" || map toLower str == "false" = BoolValue (read str)
+    | otherwise = StringValue str
   mergeDataFrames :: Either ErrorMessage DataFrame -> DataFrame -> DataFrame
   mergeDataFrames (Right (DataFrame existingColumns existingRows)) (DataFrame newColumns newRows) =
     DataFrame existingColumns (existingRows ++ newRows)
@@ -150,11 +172,14 @@ executeSql sql = case parseStatement sql of
   updateDataFrame :: Either ErrorMessage DataFrame -> [(String, Value)] -> Maybe Condition -> DataFrame
   updateDataFrame (Right (DataFrame existingColumns existingRows)) updates condition =
     let columnsToUpdate = map (\(colName, _) -> Column colName StringType) updates
-        updatedRows = map (\row -> updateRow columnsToUpdate updates row) existingRows
+        updatedRows = map (\row -> case condition of
+                                      Just cond -> if evalCondition cond (DataFrame existingColumns [row]) row
+                                                    then updateRow columnsToUpdate updates row
+                                                    else row
+                                      Nothing -> updateRow columnsToUpdate updates row
+                        ) existingRows
         updatedData = DataFrame existingColumns updatedRows
-    in case condition of
-      Just cond -> filterDataFrame cond updatedData
-      Nothing -> updatedData
+    in updatedData
   updateDataFrame _ _ _ = error "Invalid data frame for update"
 
   filterDataFrame :: Condition -> DataFrame -> DataFrame
